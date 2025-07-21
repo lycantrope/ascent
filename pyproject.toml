@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "ascent"
+version = "0.1.0"
+description = "Annotation-free Self-supervised Contrastive Embeddings for 3D Neuron Tracking"
+authors = ["Haejun Han"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

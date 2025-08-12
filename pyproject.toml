@@ -6,10 +6,19 @@ authors = ["Haejun Han"]
 license = "MIT"
 readme = "README.md"
 
-[tool.poetry.dependencies]
-python = "^3.12"
+[tool.poetry.scripts]
+ascent = "ascent.cli:main"
 
+[tool.poetry.dependencies]
+python = ">=3.9,<3.13"
+torch = "^2.5"
+torchvision = "^0.20"
+timm = "^1.0"
+numpy = "^1.26"
+scipy = "^1.14"
+pandas = "^2.2"
+h5py = "^3.12"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=1.9.0"]
 build-backend = "poetry.core.masonry.api"

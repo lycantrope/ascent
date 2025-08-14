@@ -18,6 +18,7 @@ numpy = "^1.26"
 scipy = "^1.14"
 pandas = "^2.2"
 h5py = "^3.12"
+tensorboard = ">=2.18"
 
 [build-system]
 requires = ["poetry-core>=1.9.0"]

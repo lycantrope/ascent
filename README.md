@@ -25,6 +25,11 @@
     - [Output Files](#output-files)
     - [Recommended Parameters](#recommended-parameters)
     - [Minimal Workflow](#minimal-workflow)
+  - [🧪 Training Your Own NETr Model](#-training-your-own-netr-model)
+    - [Quick start](#quick-start)
+    - [Configuration schema](#configuration-schema)
+    - [Notes On Parameters](#notes-on-parameters)
+    - [Tips](#tips)
   - [📜 License](#-license)
 
 ---
@@ -56,6 +61,8 @@ python -c "import ascent, torch; print('ASCENT', ascent.__version__, '| CUDA ava
 ---
 
 ## 🔬 Optional: Generate Neuron Candidates with **StarDist 3-D**
+
+If you already have detections (centroids) from a separate pipeline, you can skip this part.
 
 ### Why a Separate Environment?
 StarDist relies on TensorFlow 2.x, which often conflicts with the CUDA/PyTorch stack used by ASCENT. Keeping them in separate conda/pip environments prevents these issues.
@@ -156,7 +163,7 @@ Both steps run sequentially in `ascent run` (see [`tools/run_ascent.py`](ascent/
 
 ### Available Pre-trained NETr Checkpoints
 
-All checkpoints share the **same NETr architecture hyperparameters** as in `examples/configs/track_lightsheet.py`.
+All checkpoints share the **same NETr architecture hyperparameters** as in `examples/configs/track_template.py`.
 
 | Model ID          | Download |Trained on (dataset)                                   | Microscope / Modality          | Voxel size (µm)       | Sample |
 | ----------------- | --- | ------------------------------------------------------ | ------------------------------ | -------------------------------- | --- |
@@ -170,7 +177,7 @@ All checkpoints share the **same NETr architecture hyperparameters** as in `exam
 **Usage**
 
 ```python
-# examples/configs/track_lightsheet.py
+# examples/configs/track_template.py
 model_ckpt = "/path/to/checkpoints/NETr-NeRVE.pth"  # or NETr-lightsheet / NETr-Opterra
 ```
 
@@ -178,7 +185,7 @@ or from the command line:
 
 ```bash
 ascent run \
-  --config examples/configs/track_lightsheet.py \
+  --config examples/configs/track_template.py \
   --model_ckpt /path/to/checkpoints/NETr-Opterra.pth
 ```
 
@@ -187,7 +194,7 @@ ascent run \
 ### Example: Tracking Lightsheet Video
 
 ```bash
-ascent run --config examples/configs/track_lightsheet.py
+ascent run --config examples/configs/track_template.py
 ```
 
 The config file defines:
@@ -206,7 +213,7 @@ Any config value can be overrideen at runtime:
 
 ```bash
 ascent run \
-  --config examples/configs/track_lightsheet.py \
+  --config examples/configs/track_template.py \
   --dataset_file_image /path/to/raw.h5 \
   --dataset_file_coord /path/to/centroids.csv \
   --dataset_axis_order ZYX \
@@ -264,7 +271,7 @@ When `runtime_output_dir="outdir"` and `runtime_output_prefix="sample"`:
 
 ### Recommended Parameters
 
-* Start with the default `examples/configs/track_lightsheet.py`.
+* Start with the default `examples/configs/track_template.py`.
 
 | Parameter                  | Recommended Value | Notes                                                                 |
 |----------------------------|-------------------|----------------------------------------------------------------------|
@@ -284,8 +291,47 @@ When `runtime_output_dir="outdir"` and `runtime_output_prefix="sample"`:
 
 1. (Optional) Generate detections with StarDist 3‑D.
 2. Point `model_ckpt` to one of the pre‑trained NETr checkpoints.
-3. Run `ascent run --config examples/configs/track_lightsheet.py`.
+3. Run `ascent run --config examples/configs/track_template.py`.
 4. Inspect `*_tracks.csv` in Napari.
+
+---
+
+## 🧪 Training Your Own NETr Model
+
+### Quick Start
+
+Train NETr from scratch or fine‑tune using a single **config file** and the training entry point:
+
+```bash
+ascent train \
+  --config examples/configs/train_NETr_template.py
+```
+
+ASCENT supports multi‑GPU training via PyTorch DistributedDataParallel (DDP) and automatically uses **all visible GPUs**.
+
+### Configuration Schema
+
+A training config is a small Python (or YAML) file that declares the **model**, **dataset**, **transforms**, **dataloader**, **losses**, **optimizer**, and run settings.
+
+See the [example](./examples/configs/train_NETr_template.py) for an example config.
+
+### Notes On Parameters
+* `device`: `"cpu"`, `"cuda"`, `"mps"`, or `"auto"`. `"auto"` picks an appropriate GPU device if available.
+* `port`: Internal port number used by DDP. Not used for single‑GPU or CPU runs.
+* `image_file`, `coord_file`: Paths to the image and detection data used for self‑supervised NETr training. See [Input File Formats](#input-file-formats) for details.
+* `dataloader`: Key–value dictionary passed to PyTorch’s `DataLoader` (e.g., `num_workers`, `batch_size`). `batch_size` has the largest impact on GPU memory usage and training speed—pick the largest value that fits without OOM.
+* `losses`: A list of losses. Each item specifies a `"class"` with `"params"`. The total loss is the **weighted sum** of items using each entry’s `"weight"`.
+* `optimizer`, `scheduler`: Defaults to Adam with learning rate **1e‑3** and **no scheduler** if not specified in the config.
+* `epochs`, `time_limit`: Maximum epochs and/or wall‑clock time (seconds). Training stops when either limit is reached. If unspecified, no limit is applied.
+* `save_every_n_epochs`, `save_time_span`: Control checkpoint frequency by epoch count or elapsed time (seconds).
+* `continue_training`: If `True`, resumes from the most recent checkpoint found alongside `model_save_path`.
+
+### Tips
+
+* Keep `axis_order`, `spacing`, and `image_channel` consistent with your data. Use percentile normalization to stabilize training across recordings.
+* Start with `batch_size=4`; increase if memory allows. If you see too few objects per frame, reduce crop sizes or jitter ranges.
+* You can list **multiple training datasets** (as a list) to mix sources; batches are interleaved across loaders each epoch.
+* For custom learning‑rate schedules or per‑layer LRs, add a `scheduler` or `optimizer.layer_lrs` to the config.
 
 ---
 

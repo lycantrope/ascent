@@ -61,7 +61,7 @@ if __name__ == "__main__":
         for num_workers in [1, 2, 4]:
             for batch_size in [1, 2, 4]:
                 print(
-                    f"Zarr|shuffle:{shuffle:bool}|n_workers:{num_workers:d}|batch_size:{batch_size:d}",
+                    f"Zarr|shuffle:{shuffle}|n_workers:{num_workers:d}|batch_size:{batch_size:d}",
                     end="",
                 )
 
@@ -90,7 +90,7 @@ if __name__ == "__main__":
             for batch_size in [1, 2, 4]:
 
                 print(
-                    f"HDF5|shuffle:{shuffle:bool}|n_workers:{num_workers:d}|batch_size:{batch_size:d}",
+                    f"HDF5|shuffle:{shuffle}|n_workers:{num_workers:d}|batch_size:{batch_size:d}",
                     end="",
                 )
                 hdf_dset = ObjectEmbeddingDataset3D(

@@ -78,7 +78,7 @@ if __name__ == "__main__":
                 )
                 t0 = time.perf_counter()
                 for i, d in enumerate(loader):
-                    d = to_device(d, "gpu")
+                    d = to_device(d, "cuda")
                     if i > 20:
                         break
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
                 )
                 t0 = time.perf_counter()
                 for i, d in enumerate(loader):
-                    d = to_device(d, "gpu")
+                    d = to_device(d, "cuda")
                     if i > 20:
                         break
                 print(f"|elapsed time:{time.perf_counter()-t0:.3f}s")

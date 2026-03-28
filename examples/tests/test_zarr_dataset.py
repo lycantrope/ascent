@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 from ascent.datasets.tracking_dataset import ObjectEmbeddingDataset3D
 
-home = Path(".")
+home = Path(r"D:\kuan\zeng-nwb\TOY21\251203-1DA\activity\W4\hdf-sequence")
 
 
 hdf_path = home / "crop-W4-activity.h5"

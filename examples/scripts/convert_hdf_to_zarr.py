@@ -38,7 +38,9 @@ def convert_h5_to_zarr(h5_path: Path, zarr_path: Path, compression: bool = True)
                 )
                 if not compression:
                     compressor = None
-                dst_grp.create_dataset(ch, data=vol, compressor=compressor)
+                dst_grp.create_dataset(
+                    ch, chunks=vol.shape, data=vol, compressor=compressor
+                )
 
 
 if __name__ == "__main__":

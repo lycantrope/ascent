@@ -72,6 +72,99 @@ class OEDItem(dict):
         return new
 
 
+# class ZarrSequence:
+#     def __init__(
+#         self,
+#         zarr_path: str | os.PathLike,
+#         image_channel=0,
+#         axis_order: str = "ZYX",
+#     ):
+#         self._data = None
+#         # This is for one dataset contains (T,Z,Y,X)
+#         self.zarr_path = Path(zarr_path)
+#         assert self.zarr_path.name.endswith((".zarr", ".zarr.zip"))
+
+#         self.is_zip = self.zarr_path.name.endswith(".zarr.zip")
+
+#         self._data = (
+#             zarr.storage.ZipStore(self.zarr_path, mode="r")
+#             if self.is_zip
+#             else self.zarr_path
+#         )
+
+#         handler = zarr.open_group(self._data, mode="r")
+
+#         keys = (k for k in handler.keys() if str(k).startswith("t"))
+#         # [t0, t1, t2, t..., tn]
+#         keys = sorted(keys, key=lambda x: int(x[1:]))
+
+#         try:
+#             # Verify dataset here
+#             assert len(keys) > 0, "No image seqeunce found in Zarr"
+#             k = next(iter(keys))
+#             dset = handler[k]
+#             assert isinstance(dset, zarr.Group), "Must be group"
+#             assert (
+#                 f"c{image_channel}" in dset.keys()
+#             ), f"No channel found in dataset: {list(dset.keys())}"
+
+#             shape = tuple(np.asarray(dset[f"c{image_channel}"]).shape)
+#             assert len(shape) == 3, "Must be 3D image"
+#         finally:
+#             self.close()
+
+#         self.keys = {int(k[1:]): f"{k}/c{image_channel}" for k in keys}
+#         self.shape = tuple(shape["ZYX".index(a)] for a in axis_order)
+#         self.max_frame = max(self.keys.keys())
+
+#     def get_filepath(self) -> Path:
+#         return self.zarr_path
+
+#     def init(self) -> None:
+#         if self._data is None:
+#             self._data = (
+#                 zarr.storage.ZipStore(self.zarr_path, mode="r")
+#                 if self.is_zip
+#                 else self.zarr_path
+#             )
+#             handler = zarr.open_group(self._data, mode="r")
+#             tmp = {k: handler[v] for k, v in self.keys.items()}
+
+#             self._data_sequence = {
+#                 k: arr for k, arr in tmp.items() if isinstance(arr, zarr.Array)
+#             }
+
+#     def close(self) -> None:
+#         if self._data is not None:
+#             if isinstance(self._data, zarr.storage.ZipStore):
+#                 try:
+#                     self._data.close()
+#                 except TypeError as _:
+#                     # h5py\_hl\files.py", line 631, in close
+#                     # Error in TypeError: bad operand type for unary ~: 'NoneType'
+#                     pass
+#             self._data = None
+#             self._data_sequence = {}
+
+#     def __len__(self) -> int:
+#         return len(self.keys)
+
+#     def __getstate__(self):
+#         # This garantee everything can be pickled.
+#         if self.data is not None:
+#             self.close()
+#         return super().__getstate__()
+
+#     def __del__(self):
+#         self.close()
+
+
+#     @property
+#     def data(
+#         self,
+#     ) -> dict[int, zarr.Array]:
+#         self.init()
+#         return self._data_sequence
 class ZarrSequence:
     def __init__(
         self,
@@ -79,75 +172,48 @@ class ZarrSequence:
         image_channel=0,
         axis_order: str = "ZYX",
     ):
-        self._data = None
+        self.data = None
         # This is for one dataset contains (T,Z,Y,X)
         self.zarr_path = Path(zarr_path)
         assert self.zarr_path.name.endswith((".zarr", ".zarr.zip"))
 
         self.is_zip = self.zarr_path.name.endswith(".zarr.zip")
 
-        self._data = (
+        self.store = (
             zarr.storage.ZipStore(self.zarr_path, mode="r")
             if self.is_zip
             else self.zarr_path
         )
+        self.data = zarr.open_array(self.store, mode="r")
 
-        handler = zarr.open_group(self._data, mode="r")
+        self.image_channel = image_channel
+        assert image_channel < self.data.shape[1], "image_channel is greater than data"
+        self.max_frame = self.data.shape[0]
 
-        keys = (k for k in handler.keys() if str(k).startswith("t"))
-        # [t0, t1, t2, t..., tn]
-        keys = sorted(keys, key=lambda x: int(x[1:]))
-
-        try:
-            # Verify dataset here
-            assert len(keys) > 0, "No image seqeunce found in Zarr"
-            k = next(iter(keys))
-            dset = handler[k]
-            assert isinstance(dset, zarr.Group), "Must be group"
-            assert (
-                f"c{image_channel}" in dset.keys()
-            ), f"No channel found in dataset: {list(dset.keys())}"
-
-            shape = tuple(np.asarray(dset[f"c{image_channel}"]).shape)
-            assert len(shape) == 3, "Must be 3D image"
-        finally:
-            self.close()
-
-        self.keys = {int(k[1:]): f"{k}/c{image_channel}" for k in keys}
+        shape = self.data.shape[2:]  # only z, y, x
         self.shape = tuple(shape["ZYX".index(a)] for a in axis_order)
-        self.max_frame = max(self.keys.keys())
+        self.close()
 
     def get_filepath(self) -> Path:
         return self.zarr_path
 
     def init(self) -> None:
-        if self._data is None:
-            self._data = (
+        if self.data is None:
+            self.store = (
                 zarr.storage.ZipStore(self.zarr_path, mode="r")
                 if self.is_zip
                 else self.zarr_path
             )
-            handler = zarr.open_group(self._data, mode="r")
-            tmp = {k: handler[v] for k, v in self.keys.items()}
-
-            self._data_sequence = {
-                k: arr for k, arr in tmp.items() if isinstance(arr, zarr.Array)
-            }
+            self.data = zarr.open_array(self.store, mode="r")
 
     def close(self) -> None:
-        if self._data is not None:
-            if isinstance(self._data, zarr.storage.ZipStore):
-                try:
-                    self._data.close()
-                except TypeError as _:
-                    # h5py\_hl\files.py", line 631, in close
-                    # Error in TypeError: bad operand type for unary ~: 'NoneType'
-                    pass
-            self._data = None
-            self._data_sequence = {}
+        if self.data is not None:
+            if self.is_zip and isinstance(self.store, zarr.storage.ZipStore):
+                self.store.close()
+            self.data = None
 
     def __len__(self) -> int:
-        return len(self.keys)
+        return self.max_frame
 
     def __getstate__(self):
         # This garantee everything can be pickled.
@@ -158,12 +224,11 @@ class ZarrSequence:
     def __del__(self):
         self.close()
 
-    @property
-    def data(
-        self,
-    ) -> dict[int, zarr.Array]:
-        self.init()
-        return self._data_sequence
+    def get_image_at(self, t: int) -> np.ndarray:
+        if self.data is None:
+            self.init()
+        assert self.data is not None, "Must be accessed after init"
+        return np.ascontiguousarray(self.data[t, self.image_channel])
 
 
 class ObjectEmbeddingDataset3D(Dataset):
@@ -365,7 +430,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                     else (0, *self.zarr_data.shape)
                 )
                 return torch.empty(shape, dtype=torch.float32)
-            vol = np.asarray(self.zarr_data.data[t])
+            vol = self.zarr_data.get_image_at(t)
             vol = np.moveaxis(vol, self._axis_permute, (0, 1, 2))
             # add channel dim
             vol = np.expand_dims(vol, axis=0).astype("f4")

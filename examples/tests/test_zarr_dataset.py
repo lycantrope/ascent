@@ -80,6 +80,7 @@ if __name__ == "__main__":
                     num_workers=num_workers,
                     shuffle=shuffle,
                     drop_last=False,
+                    prefetch_factor=2,
                 )
                 t0 = time.perf_counter()
                 for i, d in enumerate(loader):

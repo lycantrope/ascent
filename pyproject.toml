@@ -2,7 +2,7 @@
 name = "ascent"
 version = "0.1.0"
 description = "Annotation-free Self-supervised Contrastive Embeddings for 3D Neuron Tracking"
-authors = ["Haejun Han"]
+authors = [ "Haejun Han" ]
 license = "MIT"
 readme = "README.md"
 
@@ -19,7 +19,8 @@ scipy = "^1.14"
 pandas = "^2.2"
 h5py = "^3.12"
 tensorboard = ">=2.18"
+zarr = ">=3.1,<3.2"
 
 [build-system]
-requires = ["poetry-core>=1.9.0"]
+requires = [ "poetry-core>=1.9.0" ]
 build-backend = "poetry.core.masonry.api"

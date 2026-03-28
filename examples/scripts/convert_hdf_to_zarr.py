@@ -17,30 +17,39 @@ def convert_h5_to_zarr(h5_path: Path, zarr_path: Path, compression: bool = True)
         h5py.File(h5_path, "r") as h5_file,
         zarr.storage.ZipStore(zarr_path, mode="w") as store,
     ):
-
         # t0, ... tn
         t_keys = (k for k in h5_file.keys() if str(k).startswith("t"))
         t_keys = sorted(t_keys, key=lambda x: int(x[1:]))
 
-        root = zarr.group(store=store)
-        for t in t_keys:
-            src_grp = h5_file[t]
-            assert isinstance(src_grp, h5py.Group), "This one should be group"
-            dst_grp = root.create_group(t)
+        grp = h5_file[t_keys[0]]
+        assert isinstance(grp, h5py.Group), "This one should be group"
 
-            for ch in src_grp.keys():
-                vol = np.asarray(src_grp[ch])
+        c_keys = (c for c in grp.keys() if str(c).startswith("c"))
+        c_keys = sorted(c_keys, key=lambda x: int(x[1:]))
 
-                compressor = Blosc(
-                    cname="zstd",
-                    clevel=5,
-                    shuffle=Blosc.SHUFFLE,
-                )
-                if not compression:
-                    compressor = None
-                dst_grp.create_dataset(
-                    ch, chunks=vol.shape, data=vol, compressor=compressor
-                )
+        vol = np.asarray(grp[c_keys[0]])
+
+        shape = vol.shape
+        compressor = Blosc(
+            cname="zstd",
+            clevel=5,
+            shuffle=Blosc.SHUFFLE,
+        )
+        if not compression:
+            compressor = None
+
+        all_vol = zarr.open(
+            store=store,
+            mode="w",
+            shape=(len(t_keys), len(c_keys), *shape),
+            chunks=(1, 1, *shape),
+            dtype=vol.dtype,
+            compressor=compressor,
+        )
+
+        for i, t in enumerate(t_keys):
+            for j, c in enumerate(c_keys):
+                all_vol[i, j] = np.asarray(h5_file[f"{t}/{c}"])
 
 
 if __name__ == "__main__":

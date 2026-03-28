@@ -165,7 +165,7 @@ class OEDItem(dict):
 #     ) -> dict[int, zarr.Array]:
 #         self.init()
 #         return self._data_sequence
-class ZarrSequence:
+class ZarrStack:
     def __init__(
         self,
         zarr_path: str | os.PathLike,
@@ -320,7 +320,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                     for t in self.frame_list:
                         self.get_image_at(t)
         else:
-            self.zarr_data = ZarrSequence(image_file, image_channel)
+            self.zarr_data = ZarrStack(image_file, image_channel)
             self.max_frame = self.zarr_data.max_frame
             # load_objects
             self.load_objects(coord_file, frame_sample_method, frame_sample_size)

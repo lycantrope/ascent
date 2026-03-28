@@ -1,6 +1,6 @@
 [project]
 name = "ascent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Annotation-free Self-supervised Contrastive Embeddings for 3D Neuron Tracking"
 authors = [{ name = "Haejun Han" }]
 license = "MIT"

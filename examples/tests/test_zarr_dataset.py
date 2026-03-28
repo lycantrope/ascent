@@ -55,6 +55,11 @@ def verification():
 
 
 if __name__ == "__main__":
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if DEVICE != "cuda":
+        print("Cannot find GPU")
+
     verification()
     # Benchmark
     for shuffle in [False, True]:
@@ -73,12 +78,12 @@ if __name__ == "__main__":
                     zarr_dset,
                     batch_size=batch_size,
                     num_workers=num_workers,
-                    shuffle=False,
+                    shuffle=shuffle,
                     drop_last=False,
                 )
                 t0 = time.perf_counter()
                 for i, d in enumerate(loader):
-                    d = to_device(d, "cuda")
+                    to_device(d, DEVICE)
                     if i > 20:
                         break
 
@@ -103,13 +108,13 @@ if __name__ == "__main__":
                     hdf_dset,
                     batch_size=batch_size,
                     num_workers=num_workers,
-                    shuffle=False,
+                    shuffle=shuffle,
                     drop_last=False,
                     prefetch_factor=2,
                 )
                 t0 = time.perf_counter()
                 for i, d in enumerate(loader):
-                    d = to_device(d, "cuda")
+                    to_device(d, DEVICE)
                     if i > 20:
                         break
                 print(f"|elapsed time:{time.perf_counter()-t0:.3f}s")

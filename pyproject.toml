@@ -14,7 +14,7 @@ dependencies = [
     "tensorboard",
     "hdf5plugin",
     "timm",
-    "torch",
+    "torch<2.11",
     "torchvision",
     "zarr<3",
     "numcodecs<0.16",

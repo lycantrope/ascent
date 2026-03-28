@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import torch
 import zarr
-import zarr.store
+import zarr.storage
 from torch.utils.data import Dataset
 
 
@@ -79,6 +79,7 @@ class ZarrSequence:
         image_channel=0,
         axis_order: str = "ZYX",
     ):
+        self._data = None
         # This is for one dataset contains (T,Z,Y,X)
         self.zarr_path = Path(zarr_path)
         assert self.zarr_path.name.endswith((".zarr", ".zarr.zip"))
@@ -86,7 +87,7 @@ class ZarrSequence:
         self.is_zip = self.zarr_path.name.endswith(".zarr.zip")
 
         self._data = (
-            zarr.storage.ZipStore(self.zarr_path, mode="r", read_only=True)
+            zarr.storage.ZipStore(self.zarr_path, mode="r")
             if self.is_zip
             else self.zarr_path
         )
@@ -96,22 +97,25 @@ class ZarrSequence:
         keys = (k for k in handler.keys() if str(k).startswith("t"))
         # [t0, t1, t2, t..., tn]
         keys = sorted(keys, key=lambda x: int(x[1:]))
-        self.keys = {int(k[1:]): f"{k}/c{image_channel}" for k in keys}
+
         try:
+            # Verify dataset here
             assert len(keys) > 0, "No image seqeunce found in Zarr"
-            k = next(iter(self.keys.values()))
+            k = next(iter(keys))
             dset = handler[k]
             assert isinstance(dset, zarr.Group), "Must be group"
             assert (
                 f"c{image_channel}" in dset.keys()
             ), f"No channel found in dataset: {list(dset.keys())}"
 
-            shape = tuple(np.asarray(dset).shape)
+            shape = tuple(np.asarray(dset[f"c{image_channel}"]).shape)
             assert len(shape) == 3, "Must be 3D image"
-            self.shape = tuple(shape["ZYX".index(a)] for a in axis_order)
-            self.max_frame = max(self.keys.keys())
         finally:
             self.close()
+
+        self.keys = {int(k[1:]): f"{k}/c{image_channel}" for k in keys}
+        self.shape = tuple(shape["ZYX".index(a)] for a in axis_order)
+        self.max_frame = max(self.keys.keys())
 
     def get_filepath(self) -> Path:
         return self.zarr_path
@@ -119,7 +123,7 @@ class ZarrSequence:
     def init(self) -> None:
         if self._data is None:
             self._data = (
-                zarr.storage.ZipStore(self.zarr_path, mode="r", read_only=True)
+                zarr.storage.ZipStore(self.zarr_path, mode="r")
                 if self.is_zip
                 else self.zarr_path
             )
@@ -304,7 +308,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                 if line == "":
                     continue
                 tokens = line.strip().split(",")
-                object_id, frame, z, y, x = tokens
+                object_id, frame, z, y, x = tokens[:5]
 
                 try:
                     frame = int(frame)
@@ -312,8 +316,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                     frame = int(float(frame))
                 object_id = int(object_id)
                 z, y, x = float(z), float(y), float(x)
-
-                assert frame < self.max_frame, f"Frame index {frame} out of bounds"
+                assert frame <= self.max_frame, f"Frame index {frame} out of bounds"
                 self.objects_by_frame[frame].append((object_id, frame, z, y, x))
                 n_obj = len(self.objects_by_frame[frame])
                 self.max_objects = max(n_obj, self.max_objects)
@@ -325,12 +328,12 @@ class ObjectEmbeddingDataset3D(Dataset):
         if frame_sample_method not in (None, "regular", "first"):
             raise ValueError(f"Unsupported frame sample method: {frame_sample_method}")
 
+        if frame_sample_method is None:
+            return
+
         assert (
             isinstance(frame_sample_size, int) and frame_sample_size > 0
         ), "frame_sample_size must be natural number"
-
-        if frame_sample_method is None:
-            return
 
         logging.info(
             f"Sample {frame_sample_size} / {len(self.frame_list)} frames using {frame_sample_method}"
@@ -408,10 +411,9 @@ class ObjectEmbeddingDataset3D(Dataset):
         image = self.get_image_at(t)
         # collate all the objects in idx frame
         objects = self.objects_by_frame[t]
-
         object_ids = torch.tensor([obj[0] for obj in objects], dtype=torch.int64)
         coords = torch.tensor(
-            [(z, y, x) for obj_id, z, y, x in objects],
+            [(z, y, x) for obj_id, t, z, y, x in objects],
             dtype=torch.float32,
         )
         return OEDItem(t, image, object_ids, coords, self.spacing, self.max_objects)

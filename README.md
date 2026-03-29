@@ -136,8 +136,15 @@ root
 └── t{frame}            # HDF5 group
     └── c{channel}      # 3-D dataset (Z × Y × X)
 ```
-
 Example: `t250/c0` holds the Z-stack for frame 250, channel 0.
+
+#### Expected Zarr/Zarr-ZipStore Layout
+
+```
+root
+└── Zarr Array (T × C × Z x Y x X float32/uint16)
+...
+```
 
 **After segmentation you’ll have:**
 

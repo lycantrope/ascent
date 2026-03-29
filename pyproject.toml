@@ -5,7 +5,7 @@ description = "Annotation-free Self-supervised Contrastive Embeddings for 3D Neu
 authors = [{ name = "Haejun Han" }]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "h5py",
     "numpy<2",

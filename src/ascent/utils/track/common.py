@@ -10,27 +10,29 @@ from scipy.ndimage import center_of_mass
 from scipy.spatial import distance
 
 
+# DoubleEndedLinkedList
 class Spot:
     def __init__(self, spot_id: str, t, coord=None):
         self.id: str = spot_id
         self.t = t
         self.coord = coord
-        self.next: Spot = None
-        self.prev: Spot = None
+        self.next: Spot | None = None
+        self.prev: Spot | None = None
 
     def __repr__(self):
         return f"Spot({self.id}, t={self.t})"
 
 
+# Head for iteration
 class TrackIterator:
     def __init__(self, head: Spot):
-        self.current: Spot = head
+        self.current = head
 
     def __iter__(self):
         return self
 
-    def __next__(self):
-        if not self.current:
+    def __next__(self) -> Spot:
+        if self.current is None:
             raise StopIteration
         else:
             item = self.current
@@ -41,17 +43,19 @@ class TrackIterator:
 class Track:
     def __init__(self, track_id: str):
         self.id: str = track_id
-        self.head: Spot = None
-        self.tail: Spot = None
+        self.head: Spot | None = None
+        self.tail: Spot | None = None
 
     def __iter__(self):
+        if self.head is None:
+            return iter([])
         return TrackIterator(self.head)
 
     def add(self, spot: Spot):
         if self.head is None and self.tail is None:
             self.head = spot
             self.tail = spot
-        else:
+        elif self.tail is not None:
             # assert self.tail.t < spot.t
             if self.tail.t == spot.t:
                 logging.warning(
@@ -63,7 +67,11 @@ class Track:
 
     def pop(self):
         """Remove and return the last spot from the track."""
-        assert self.tail is not None and self.tail.next is None
+        assert (
+            self.tail is not None
+            and self.tail.prev is not None
+            and self.tail.next is None
+        )
         if self.tail == self.head:
             spot = self.tail
             self.head = None
@@ -233,7 +241,9 @@ def _count_tracking_errors_from_dicts(
     }
 
 
-def count_tracking_errors(gt_tracks: dict[str, Track], pred_tracks: dict[str, Track]) -> dict:
+def count_tracking_errors(
+    gt_tracks: dict[str, Track], pred_tracks: dict[str, Track]
+) -> dict:
     """
     Counts the tracking errors between ground truth tracks and predicted tracks.
 
@@ -250,7 +260,9 @@ def count_tracking_errors(gt_tracks: dict[str, Track], pred_tracks: dict[str, Tr
     return _count_tracking_errors_from_dicts(gt_dict, pred_dict)
 
 
-def map_gt_to_pred_spots(gt_spots, pred_spots, dist_threshold, scale=(1.5, 0.3226, 0.3226)):
+def map_gt_to_pred_spots(
+    gt_spots, pred_spots, dist_threshold, scale=(1.5, 0.3226, 0.3226)
+):
     for t in gt_spots["t"].unique():
         df_c_g_t = gt_spots[gt_spots["t"] == t]
         df_c_p_t = pred_spots[pred_spots["t"] == t]
@@ -278,7 +290,9 @@ def map_gt_to_pred_spots(gt_spots, pred_spots, dist_threshold, scale=(1.5, 0.322
         gt_spots.loc[df_c_g_t.index, "mutual_nn"] = mutual_nn.any(axis=1)
         pred_spots.loc[df_c_p_t.index, "mutual_nn"] = mutual_nn.any(axis=0)
 
-    df_c_g_valid = gt_spots[(gt_spots["min_dist"] <= dist_threshold) & gt_spots["mutual_nn"]]
+    df_c_g_valid = gt_spots[
+        (gt_spots["min_dist"] <= dist_threshold) & gt_spots["mutual_nn"]
+    ]
     oid_gt = df_c_g_valid.index
     oid_pred = df_c_g_valid["min_dist_oid_p"]
     map_gt_to_pred = dict(zip(oid_gt, oid_pred))
@@ -287,84 +301,106 @@ def map_gt_to_pred_spots(gt_spots, pred_spots, dist_threshold, scale=(1.5, 0.322
 
 
 def map_gt_to_pred_spots_from_label(
-    gt_spots, pred_spots, file_label, dist_threshold, scale, file_out_gt=None, file_out_pred=None
+    gt_spots,
+    pred_spots,
+    file_label,
+    dist_threshold,
+    scale,
+    file_out_gt=None,
+    file_out_pred=None,
 ):
     if file_out_gt is not None and os.path.exists(file_out_gt):
         gt_spots = pd.read_csv(file_out_gt, index_col=0)
         gt_spots["mapping"] = gt_spots["mapping"].astype(int)
     else:
-        f = h5py.File(file_label, "r")
-        oid_offset = f["oid_offset"][()]
-        scale = np.array(scale)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        with h5py.File(file_label, "r") as f:
+            oid_offset = f["oid_offset"][()]
+            scale = np.array(scale)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # optimal mapping to each other
-        # -1 means there is no mapping
-        gt_spots.loc[:, "mapping"] = -1
-        pred_spots.loc[:, "mapping"] = -1
-        for t in gt_spots["t"].unique():
-            # read the instance segmentation result
-            label_t = np.array(f[str(t)])
-            # get the center of mass of each instance
-            cm_t = center_of_mass(label_t, label_t, range(1, int(label_t.max()) + 1))
+            # optimal mapping to each other
+            # -1 means there is no mapping
+            gt_spots.loc[:, "mapping"] = -1
+            pred_spots.loc[:, "mapping"] = -1
+            for t in gt_spots["t"].unique():
+                # read the instance segmentation result
+                label_t = np.array(f[str(t)])
+                # get the center of mass of each instance
+                cm_t = center_of_mass(
+                    label_t, label_t, range(1, int(label_t.max()) + 1)
+                )
 
-            # get the spots for time t
-            df_c_g_t = gt_spots[gt_spots["t"] == t]
-            df_c_p_t = pred_spots[pred_spots["t"] == t]
+                # get the spots for time t
+                df_c_g_t = gt_spots[gt_spots["t"] == t]
+                df_c_p_t = pred_spots[pred_spots["t"] == t]
 
-            # Mapping from gt to pred; First, find the label of each gt spot.
-            # The label + oid_offset is the object id in the pred spots.
-            coord_gt = np.round(df_c_g_t[["z", "y", "x"]].values).astype(int)
-            label_gt_spots = label_t[coord_gt[:, 0], coord_gt[:, 1], coord_gt[:, 2]].astype(int)
-            label_gt_spots[label_gt_spots == 0] = -1
-            label_gt_spots[label_gt_spots > 0] += oid_offset[t] - 1
-            gt_spots.loc[df_c_g_t.index, "mapping"] = label_gt_spots.astype(int)
+                # Mapping from gt to pred; First, find the label of each gt spot.
+                # The label + oid_offset is the object id in the pred spots.
+                coord_gt = np.round(df_c_g_t[["z", "y", "x"]].values).astype(int)
+                label_gt_spots = label_t[
+                    coord_gt[:, 0], coord_gt[:, 1], coord_gt[:, 2]
+                ].astype(int)
+                label_gt_spots[label_gt_spots == 0] = -1
+                label_gt_spots[label_gt_spots > 0] += oid_offset[t] - 1
+                gt_spots.loc[df_c_g_t.index, "mapping"] = label_gt_spots.astype(int)
 
-            # Next, for the ones that have the same label, select the one with the smallest distance to the centroid of that label.
-            lbl_cnt = gt_spots.loc[df_c_g_t.index, "mapping"].value_counts()
-            lbl_cnt.index = lbl_cnt.index.astype(int)
-            lbl_cnt = lbl_cnt[lbl_cnt > 1]
-            for lbl in lbl_cnt.index:
-                if lbl < 0:
-                    continue
-                df_c_g_lbl = df_c_g_t[gt_spots.loc[df_c_g_t.index, "mapping"] == lbl]
-                # bug fix: lbl - oid_offset[t] - 1 => lbl - oid_offset[t]
-                cm_lbl = cm_t[lbl - oid_offset[t]]
-                dist = distance.cdist(df_c_g_lbl[["z", "y", "x"]].values * scale, [cm_lbl * scale])
-                min_dist_idx = df_c_g_lbl.index[np.argmin(dist)]
-                df_c_g_free = df_c_g_lbl.drop(min_dist_idx)
-                gt_spots.loc[df_c_g_free.index, "mapping"] = -1
+                # Next, for the ones that have the same label, select the one with the smallest distance to the centroid of that label.
+                lbl_cnt = gt_spots.loc[df_c_g_t.index, "mapping"].value_counts()
+                lbl_cnt.index = lbl_cnt.index.astype(int)
+                lbl_cnt = lbl_cnt[lbl_cnt > 1]
+                for lbl in lbl_cnt.index:
+                    if lbl < 0:
+                        continue
+                    df_c_g_lbl = df_c_g_t[
+                        gt_spots.loc[df_c_g_t.index, "mapping"] == lbl
+                    ]
+                    # bug fix: lbl - oid_offset[t] - 1 => lbl - oid_offset[t]
+                    cm_lbl = cm_t[lbl - oid_offset[t]]
+                    dist = distance.cdist(
+                        df_c_g_lbl[["z", "y", "x"]].values * scale, [cm_lbl * scale]
+                    )
+                    min_dist_idx = df_c_g_lbl.index[np.argmin(dist)]
+                    df_c_g_free = df_c_g_lbl.drop(min_dist_idx)
+                    gt_spots.loc[df_c_g_free.index, "mapping"] = -1
 
-            # Fill the mapping column in the pred spots
-            for idx in df_c_g_t.index:
-                gt_mapping = gt_spots.loc[idx, "mapping"]
-                if gt_mapping >= 0:
-                    pred_spots.loc[gt_mapping, "mapping"] = idx
+                # Fill the mapping column in the pred spots
+                for idx in df_c_g_t.index:
+                    gt_mapping = gt_spots.loc[idx, "mapping"]
+                    if gt_mapping >= 0:
+                        pred_spots.loc[gt_mapping, "mapping"] = idx
 
-            # Next, for the ones that did not match with any pred spots, find the closest pred spot which is not matched with any gt spots.
-            df_c_g_t_left = gt_spots[(gt_spots["t"] == t) & (gt_spots["mapping"] < 0)]
-            df_c_p_t_left = pred_spots[(pred_spots["t"] == t) & (pred_spots["mapping"] < 0)]
-            coord_g = torch.from_numpy(df_c_g_t_left[["z", "y", "x"]].values * scale).to(device)
-            coord_p = torch.from_numpy(df_c_p_t[["z", "y", "x"]].values * scale).to(device)
-            # calculate the distance between each gt spot and each pred spot
-            dist = torch.cdist(coord_g, coord_p, p=2)
-            dist_order_g_to_p = torch.argsort(dist, dim=1)
-            temp_mapping = {}
-            for i in range(dist_order_g_to_p.shape[0]):
-                j = dist_order_g_to_p[i, 0].item()
-                # if the pred spot is not matched with any gt spots
-                if df_c_p_t.index[j] in df_c_p_t_left.index:
-                    # if the pred spot is the closest to the gt spot (mutual nearest neighbor)
-                    if (j not in temp_mapping or dist[i, j] < temp_mapping[j][1]) and dist[
-                        i, j
-                    ] < dist_threshold:
-                        temp_mapping[j] = (i, dist[i, j])
-            # assign the mapping
-            for j, (i, d) in temp_mapping.items():
-                gt_spots.loc[df_c_g_t_left.index[i], "mapping"] = df_c_p_t.index[j]
-                pred_spots.loc[df_c_p_t.index[j], "mapping"] = df_c_g_t_left.index[i]
-
-        f.close()
+                # Next, for the ones that did not match with any pred spots, find the closest pred spot which is not matched with any gt spots.
+                df_c_g_t_left = gt_spots[
+                    (gt_spots["t"] == t) & (gt_spots["mapping"] < 0)
+                ]
+                df_c_p_t_left = pred_spots[
+                    (pred_spots["t"] == t) & (pred_spots["mapping"] < 0)
+                ]
+                coord_g = torch.from_numpy(
+                    df_c_g_t_left[["z", "y", "x"]].values * scale
+                ).to(device)
+                coord_p = torch.from_numpy(df_c_p_t[["z", "y", "x"]].values * scale).to(
+                    device
+                )
+                # calculate the distance between each gt spot and each pred spot
+                dist = torch.cdist(coord_g, coord_p, p=2)
+                dist_order_g_to_p = torch.argsort(dist, dim=1)
+                temp_mapping = {}
+                for i in range(dist_order_g_to_p.shape[0]):
+                    j = dist_order_g_to_p[i, 0].item()
+                    # if the pred spot is not matched with any gt spots
+                    if df_c_p_t.index[j] in df_c_p_t_left.index:
+                        # if the pred spot is the closest to the gt spot (mutual nearest neighbor)
+                        if (
+                            j not in temp_mapping or dist[i, j] < temp_mapping[j][1]
+                        ) and dist[i, j] < dist_threshold:
+                            temp_mapping[j] = (i, dist[i, j])
+                # assign the mapping
+                for j, (i, d) in temp_mapping.items():
+                    gt_spots.loc[df_c_g_t_left.index[i], "mapping"] = df_c_p_t.index[j]
+                    pred_spots.loc[df_c_p_t.index[j], "mapping"] = df_c_g_t_left.index[
+                        i
+                    ]
 
     # get the mapping
     df_c_g_valid = gt_spots[gt_spots["mapping"] >= 0]

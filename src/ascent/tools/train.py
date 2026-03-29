@@ -48,6 +48,7 @@ def train_model(rank, world_size, config, **kwargs):
 
     # set up tensorboard
     # read https://pytorch.org/tutorials/intermediate/tensorboard_tutorial.html for basic introduction to tensorboard in pytorch
+    writer = None
     if rank == 0:
         writer = setup_tensorboard(cfg)
 
@@ -72,9 +73,9 @@ def train_model(rank, world_size, config, **kwargs):
     scheduler = setup_scheduler(cfg, optimizer)
 
     # either time_limit or epochs should be specified
-    assert "time_limit" in cfg or "epochs" in cfg, (
-        "either time_limit or epochs should be specified in the config file"
-    )
+    assert (
+        "time_limit" in cfg or "epochs" in cfg
+    ), "either time_limit or epochs should be specified in the config file"
 
     # Retrieve time limit from configuration, defaulting to a large number if not specified
     time_limit = cfg.get("time_limit", float("inf"))  # Time limit in seconds
@@ -120,7 +121,7 @@ def train_model(rank, world_size, config, **kwargs):
         )
 
         # Tensorboard logging and model saving should be done only by rank 0
-        if rank == 0:
+        if writer is not None:
             # Log the current epoch
             if len(train_loss) == 1:
                 writer.add_scalar("Train/Loss", train_loss[0], epoch)
@@ -173,7 +174,7 @@ def train_model(rank, world_size, config, **kwargs):
             is_initial_epoch = False
 
     # Save the last model
-    if rank == 0:
+    if writer is not None:
         model_save_path = cfg.get("model_save_path", "./model.pth")
         save_model(model, optimizer, scheduler, model_save_path)
         # close tensorboard
@@ -194,7 +195,12 @@ def main():
     num_gpus = torch.cuda.device_count()
     world_size = num_gpus  # One process per GPU
     if world_size > 1:
-        mp.spawn(train_model, args=(world_size, args.config), nprocs=world_size, join=True)
+        mp.spawn(  # type: ignore
+            train_model,
+            args=(world_size, args.config),
+            nprocs=world_size,
+            join=True,
+        )
     else:
         train_model(0, 1, args.config)
 

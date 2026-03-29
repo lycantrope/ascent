@@ -308,7 +308,7 @@ class ObjectEmbeddingDataset3D(Dataset):
         if image_file.endswith(".h5"):
             # lazy loading
             with h5py.File(image_file, "r") as f:
-                list_keys = [int(k[1:]) for k in f if k.startswith("t")]
+                list_keys = [int(k[1:]) for k in f.keys() if str(k).startswith("t")]
             assert len(list_keys) > 0, "No frame found"
             self.max_frame = max(list_keys) + 1
             self.image_stack = [None] * self.max_frame
@@ -444,7 +444,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                 if self.empty_image:
                     if self.image_dim is None:
                         with h5py.File(self.image_file, "r") as f:
-                            vol = f[f"t{t}"][f"c{self.image_channel}"][:]
+                            vol = f[f"t{t}/c{self.image_channel}"][:]
                             # re-order axes to Z Y X
                             vol = np.moveaxis(vol, self._axis_permute, (0, 1, 2))
                             self.image_dim = vol.shape
@@ -455,7 +455,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                     )
                 else:
                     with h5py.File(self.image_file, "r") as f:
-                        vol = f[f"t{t}"][f"c{self.image_channel}"][:]
+                        vol = f[f"t{t}/c{self.image_channel}"][:]
                         # re-order axes to Z Y X
                         vol = np.moveaxis(vol, self._axis_permute, (0, 1, 2))
                         # add channel dim

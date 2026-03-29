@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 from collections import defaultdict
@@ -45,7 +47,7 @@ class OEDItem(dict):
         self["coords"] = coords
         self["spacing"] = spacing
 
-    def new_item(self, **kwargs):
+    def new_item(self, **kwargs) -> "OEDItem":
         new = OEDItem(
             t=kwargs.get("t", self["t"]),
             image=kwargs.get("image", self["image"]),
@@ -56,12 +58,12 @@ class OEDItem(dict):
         )
         return new
 
-    @staticmethod
-    def get_item(batched_x, idx):
+    @classmethod
+    def get_item(cls, batched_x, idx) -> "OEDItem":
         assert (
             len(batched_x["image"].shape) == 5
         ), "get_item is only supported for batched OEDItems"
-        new = OEDItem(
+        new = cls(
             t=batched_x["t"][idx],
             image=batched_x["image"][idx],
             object_ids=batched_x["object_ids"][idx],
@@ -72,99 +74,6 @@ class OEDItem(dict):
         return new
 
 
-# class ZarrSequence:
-#     def __init__(
-#         self,
-#         zarr_path: str | os.PathLike,
-#         image_channel=0,
-#         axis_order: str = "ZYX",
-#     ):
-#         self._data = None
-#         # This is for one dataset contains (T,Z,Y,X)
-#         self.zarr_path = Path(zarr_path)
-#         assert self.zarr_path.name.endswith((".zarr", ".zarr.zip"))
-
-#         self.is_zip = self.zarr_path.name.endswith(".zarr.zip")
-
-#         self._data = (
-#             zarr.storage.ZipStore(self.zarr_path, mode="r")
-#             if self.is_zip
-#             else self.zarr_path
-#         )
-
-#         handler = zarr.open_group(self._data, mode="r")
-
-#         keys = (k for k in handler.keys() if str(k).startswith("t"))
-#         # [t0, t1, t2, t..., tn]
-#         keys = sorted(keys, key=lambda x: int(x[1:]))
-
-#         try:
-#             # Verify dataset here
-#             assert len(keys) > 0, "No image seqeunce found in Zarr"
-#             k = next(iter(keys))
-#             dset = handler[k]
-#             assert isinstance(dset, zarr.Group), "Must be group"
-#             assert (
-#                 f"c{image_channel}" in dset.keys()
-#             ), f"No channel found in dataset: {list(dset.keys())}"
-
-#             shape = tuple(np.asarray(dset[f"c{image_channel}"]).shape)
-#             assert len(shape) == 3, "Must be 3D image"
-#         finally:
-#             self.close()
-
-#         self.keys = {int(k[1:]): f"{k}/c{image_channel}" for k in keys}
-#         self.shape = tuple(shape["ZYX".index(a)] for a in axis_order)
-#         self.max_frame = max(self.keys.keys())
-
-#     def get_filepath(self) -> Path:
-#         return self.zarr_path
-
-#     def init(self) -> None:
-#         if self._data is None:
-#             self._data = (
-#                 zarr.storage.ZipStore(self.zarr_path, mode="r")
-#                 if self.is_zip
-#                 else self.zarr_path
-#             )
-#             handler = zarr.open_group(self._data, mode="r")
-#             tmp = {k: handler[v] for k, v in self.keys.items()}
-
-#             self._data_sequence = {
-#                 k: arr for k, arr in tmp.items() if isinstance(arr, zarr.Array)
-#             }
-
-#     def close(self) -> None:
-#         if self._data is not None:
-#             if isinstance(self._data, zarr.storage.ZipStore):
-#                 try:
-#                     self._data.close()
-#                 except TypeError as _:
-#                     # h5py\_hl\files.py", line 631, in close
-#                     # Error in TypeError: bad operand type for unary ~: 'NoneType'
-#                     pass
-#             self._data = None
-#             self._data_sequence = {}
-
-#     def __len__(self) -> int:
-#         return len(self.keys)
-
-#     def __getstate__(self):
-#         # This garantee everything can be pickled.
-#         if self.data is not None:
-#             self.close()
-#         return super().__getstate__()
-
-#     def __del__(self):
-#         self.close()
-
-
-#     @property
-#     def data(
-#         self,
-#     ) -> dict[int, zarr.Array]:
-#         self.init()
-#         return self._data_sequence
 class ZarrStack:
     def __init__(
         self,
@@ -311,7 +220,7 @@ class ObjectEmbeddingDataset3D(Dataset):
                 list_keys = [int(k[1:]) for k in f.keys() if str(k).startswith("t")]
             assert len(list_keys) > 0, "No frame found"
             self.max_frame = max(list_keys) + 1
-            self.image_stack = [None] * self.max_frame
+            self.image_stack: list[None | torch.Tensor] = [None] * self.max_frame
 
             self.load_objects(coord_file, frame_sample_method, frame_sample_size)
             # Load all images into memory if not using lazy loading
@@ -435,37 +344,40 @@ class ObjectEmbeddingDataset3D(Dataset):
             # add channel dim
             vol = np.expand_dims(vol, axis=0).astype("f4")
             vol = torch.tensor(vol, dtype=torch.float32)
+            vol = self._maybe_normalize(vol)
             return self._maybe_normalize(vol)
         else:
             # Method to fetch the image at time t
-            if self.image_stack[t] is None:
-                # lazy loading
-                assert self.image_file.split(".")[-1] == "h5"
-                if self.empty_image:
-                    if self.image_dim is None:
-                        with h5py.File(self.image_file, "r") as f:
-                            vol = f[f"t{t}/c{self.image_channel}"][:]
-                            # re-order axes to Z Y X
-                            vol = np.moveaxis(vol, self._axis_permute, (0, 1, 2))
-                            self.image_dim = vol.shape
-
-                    # create empty image - it will be used for getting the dimension of the image
-                    self.image_stack[t] = torch.empty(
-                        0, self.image_dim[-3], self.image_dim[-2], self.image_dim[-1]
-                    )
-                else:
+            vol = self.image_stack[t]
+            if vol is not None:
+                return vol
+            # lazy loading
+            assert self.image_file.split(".")[-1] == "h5"
+            if self.empty_image:
+                if self.image_dim is None:
                     with h5py.File(self.image_file, "r") as f:
-                        vol = f[f"t{t}/c{self.image_channel}"][:]
+                        vol = np.asarray(f[f"t{t}/c{self.image_channel}"])
                         # re-order axes to Z Y X
                         vol = np.moveaxis(vol, self._axis_permute, (0, 1, 2))
-                        # add channel dim
-                        vol = np.expand_dims(vol, axis=0)
-                        vol = torch.tensor(vol, dtype=torch.float32)
-                        # normalize per loaded frame (no clipping afterwards)
-                        vol = self._maybe_normalize(vol)
-                        self.image_stack[t] = vol
+                        self.image_dim = vol.shape
 
-            return self.image_stack[t]
+                # create empty image - it will be used for getting the dimension of the image
+                vol = torch.empty(
+                    0, self.image_dim[-3], self.image_dim[-2], self.image_dim[-1]
+                )
+            else:
+                with h5py.File(self.image_file, "r") as f:
+                    vol = np.asarray(f[f"t{t}/c{self.image_channel}"])
+                    # re-order axes to Z Y X
+                    vol = np.moveaxis(vol, self._axis_permute, (0, 1, 2))
+                    # add channel dim
+                    vol = np.expand_dims(vol, axis=0)
+                    vol = torch.tensor(vol, dtype=torch.float32)
+                    # normalize per loaded frame (no clipping afterwards)
+                    vol = self._maybe_normalize(vol)
+
+            self.image_stack[t] = vol
+            return vol
 
     def get_frame(self, idx):
         return self.frame_list[idx]

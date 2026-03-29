@@ -42,7 +42,8 @@ ASCENT runs on Python **3.10–3.12** (Linux/macOS/Windows). It’s a standard P
 
 ### Quick Install (from Source)
 
-```bash
+#### Use **`pip/conda`**
+```sh
 # Create a fresh environment (recommended)
 conda create -n ascent python=3.12 && conda activate ascent
 # or: python -m venv .venv && source .venv/bin/activate
@@ -56,6 +57,19 @@ pip install -e .
 
 # Sanity check
 python -c "import ascent, torch; print('ASCENT', ascent.__version__, '| CUDA available:', torch.cuda.is_available())"
+```
+
+#### Use **`uv`**
+```sh
+# Clone the repository
+git clone https://github.com/lu-lab/ascent.git
+cd ascent
+
+# Install ASCENT with .venv
+uv sync
+ 
+# Sanity check
+uv run python -c "import ascent, torch; print('ASCENT', ascent.__version__, '| CUDA available:', torch.cuda.is_available())"
 ```
 
 ---
@@ -191,7 +205,7 @@ model_ckpt = "/path/to/checkpoints/NETr-NeRVE.pth"  # or NETr-lightsheet / NETr-
 or from the command line:
 
 ```bash
-ascent run \
+python -m ascent run \
   --config examples/configs/track_template.py \
   --model_ckpt /path/to/checkpoints/NETr-Opterra.pth
 ```
@@ -201,8 +215,10 @@ ascent run \
 ### Example: Tracking Lightsheet Video
 
 ```bash
-ascent run --config examples/configs/track_template.py
+python -m ascent run --config examples/configs/track_template.py
 ```
+
+
 
 The config file defines:
 
@@ -219,7 +235,7 @@ The config file defines:
 Any config value can be overrideen at runtime:
 
 ```bash
-ascent run \
+python -m ascent run \
   --config examples/configs/track_template.py \
   --dataset_file_image /path/to/raw.h5 \
   --dataset_file_coord /path/to/centroids.csv \
@@ -319,7 +335,7 @@ When `runtime_output_dir="outdir"` and `runtime_output_prefix="sample"`:
 Train NETr from scratch or fine‑tune using a single **config file** and the training entry point:
 
 ```bash
-ascent train \
+python -m ascent train \
   --config examples/configs/train_NETr_template.py
 ```
 

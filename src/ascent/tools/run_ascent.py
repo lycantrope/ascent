@@ -80,7 +80,7 @@ def parse_cli() -> dict:
 
 
 def setup_logger(level: str, out_dir: Path, out_prefix: str) -> None:
-    curtime = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    curtime = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format="%(asctime)s | (%(levelname)s) %(message)s",
@@ -124,7 +124,9 @@ def main() -> None:
         num_workers=0,
         drop_last=False,
     )
-    logging.info(f"Dataloader created with batch size {cfg['runtime_batch_size_frame']}")
+    logging.info(
+        f"Dataloader created with batch size {cfg['runtime_batch_size_frame']}"
+    )
 
     # ---------------- Model ----------------
     model = NETr(
@@ -179,7 +181,8 @@ def main() -> None:
     tracker = HungarianTracker(
         file_objects=cfg["dataset_file_coord"],
         file_z=out_dir / f"{cfg['runtime_output_prefix']}_pred_z.pt",
-        file_object_ids_z=out_dir / f"{cfg['runtime_output_prefix']}_pred_object_ids.pt",
+        file_object_ids_z=out_dir
+        / f"{cfg['runtime_output_prefix']}_pred_object_ids.pt",
         device=device,
         momentum=cfg["tracking_momentum"],
         temperature=cfg["tracking_temperature"],

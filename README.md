@@ -229,7 +229,7 @@ ascent run \
 
 ### Input File Formats
 
-#### 1. Raw Video (HDF5)
+#### 1a. Raw Video (HDF5)
 
 ```
 root
@@ -240,8 +240,17 @@ root
 ...
 ```
 
+
+#### 1b. Raw Video (Zarr ZipStore)
+```
+root
+└── Zarr Array (T × C × Z x Y x X float32/uint16)
+...
+```
+
 * Axis order in each dataset is set via `dataset_axis_order` (`"ZYX"`, `"YXZ"`, etc.).
 * `dataset_image_channel` selects the channel to load.
+* For 1b, you can convert HDF5 sequence (FileType in 1a) to Zarr ZipStore (1b.) by [examples/scripts/convert_hdf_to_zarr.py](examples/scripts/convert_hdf_to_zarr.py)
 
 #### 2. Detections CSV
 

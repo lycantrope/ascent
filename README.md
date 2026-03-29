@@ -157,7 +157,7 @@ ASCENT’s `run` mode performs:
 1. **Feature extraction** – NETr encodes each neuron candidate into a high‑dimensional **embedding vector** that captures appearance and context.
 2. **Tracking** – **HungarianTracker** links candidates across frames using cosine similarity in embedding space, producing continuous neuron identities.
 
-Both steps run sequentially in `ascent run` (see [`tools/run_ascent.py`](ascent/tools/run_ascent.py)).
+Both steps run sequentially in `ascent run` (see [`tools/run_ascent.py`](src/ascent/tools/run_ascent.py)).
 
 ---
 

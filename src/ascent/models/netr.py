@@ -15,7 +15,7 @@ DeviceData = Union[torch.Tensor, Dict[str, Any], List[Any], Any]
 T = TypeVar("T", bound=DeviceData)
 
 
-def to_device(data: T, device: torch.Device) -> T:
+def to_device(data: T, device: torch.device) -> T:
     if isinstance(data, dict):
         return {k: to_device(v, device) for k, v in data.items()}  # type: ignore
     elif isinstance(data, torch.Tensor):

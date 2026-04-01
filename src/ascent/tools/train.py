@@ -182,27 +182,28 @@ def train_model(rank, world_size, config, **kwargs):
 
     logging.info("Training completed.")
 
-    if world_size > 1:
-        cleanup_ddp()
-
 
 def main():
     parser = argparse.ArgumentParser()
     # config file path
     parser.add_argument("--config", type=str, required=True)
+    parser.add_argument("--disable-ddp", action="store_true", default=False)
     args = parser.parse_args()
 
     num_gpus = torch.cuda.device_count()
     world_size = num_gpus  # One process per GPU
-    if world_size > 1:
-        mp.spawn(  # type: ignore
-            train_model,
-            args=(world_size, args.config),
-            nprocs=world_size,
-            join=True,
-        )
-    else:
+    if args.disable_ddp or world_size < 2:
         train_model(0, 1, args.config)
+    else:
+        try:
+            mp.spawn(  # type: ignore
+                train_model,
+                args=(world_size, args.config),
+                nprocs=world_size,
+                join=True,
+            )
+        finally:
+            cleanup_ddp()
 
 
 if __name__ == "__main__":

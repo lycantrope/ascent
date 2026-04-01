@@ -8,8 +8,8 @@ class AllGather(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, tensor_list, tensor):
-        dist.all_gather(tensor_list, tensor)
+    def forward(ctx, tensor_list: list[torch.Tensor], tensor: torch.Tensor):
+        dist.all_gather([t.contiguous() for t in tensor_list], tensor.contiguous())
         return tuple(tensor_list)
 
     @staticmethod
@@ -18,10 +18,13 @@ class AllGather(torch.autograd.Function):
         rank = dist.get_rank()
 
         dist_ops = [
-            dist.reduce(grad_list[i], i, async_op=True) for i in range(dist.get_world_size())
+            dist.reduce(grad_list[i], i, async_op=True)
+            for i in range(dist.get_world_size())
         ]
 
         for op in dist_ops:
+            if op is None:
+                continue
             op.wait()
 
         return None, grad_list[rank]

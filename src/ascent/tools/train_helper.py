@@ -1,20 +1,24 @@
+import functools
 import glob
 import logging
 import os
 import re
 import time
+from multiprocessing import resource_tracker
 
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.distributed.nn as dist_nn
+import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms.v2 import Compose
 
+from ascent.models.loss import CombinedLoss
 from ascent.utils.common import to_device
-from ascent.utils.distributed import all_gather
 
 
 def setup_ddp(rank, world_size, port):
@@ -23,14 +27,33 @@ def setup_ddp(rank, world_size, port):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
-def cleanup_ddp():
-    dist.destroy_process_group()
+def cleanup(fn):
+    try:
+        mp.set_sharing_strategy("file_system")
+    except Exception as e:
+        print(f"Warning: Could not set sharing strategy: {e}")
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        """Manual cleanup of shared memory objects owned by the current user."""
+        try:
+            ret = fn(*args, **kwargs)
+            return ret
+        finally:
+            try:
+                if dist.is_initialized():
+                    dist.destroy_process_group()
+                # This helps the resource tracker finalize its accounting
+                resource_tracker._resource_tracker._stop()  # type: ignore
+            except Exception:
+                pass
+
+    return wrapper
 
 
 def gather_embeddings(embeddings):
     # Gather embeddings from all processes
-    gathered = [torch.zeros_like(embeddings) for _ in range(dist.get_world_size())]
-    all_gather(gathered, embeddings)
+    gathered = dist_nn.all_gather(embeddings)
     return torch.cat(gathered, dim=0)
 
 
@@ -99,7 +122,9 @@ def setup_tensorboard(cfg):
     tensorboard_dir = cfg.get("tensorboard_logdir", None)
     if not tensorboard_dir:
         if "logfile" in cfg and cfg["logfile"]:
-            tensorboard_dir = os.path.join(os.path.dirname(cfg["logfile"]), "tensorboard_logs")
+            tensorboard_dir = os.path.join(
+                os.path.dirname(cfg["logfile"]), "tensorboard_logs"
+            )
         else:
             tensorboard_dir = "tensorboard_logs"
 
@@ -166,7 +191,10 @@ def _init_dataloader(cfg, dataset, world_size, rank) -> DataLoader:
         cfg_extra = cfg.copy()
         cfg_extra.pop("batch_sampler")
         dataloader = DataLoader(
-            dataset, batch_sampler=batch_sampler_instance, collate_fn=no_collate_fn, **cfg_extra
+            dataset,
+            batch_sampler=batch_sampler_instance,
+            collate_fn=no_collate_fn,
+            **cfg_extra,
         )
     else:
         # Normal DataLoader initialization
@@ -252,7 +280,9 @@ def get_last_saved_model_path_epoch_time(cfg):
     saved_models = glob.glob(model_save_path.replace(".pth", "_epoch_*_time_*.pth"))
     saved_models = [m for m in saved_models if re_model_save_path.match(m)]
     if len(saved_models) > 0:
-        saved_models.sort(key=lambda x: int(re_model_save_path.match(x).group(2)), reverse=True)
+        saved_models.sort(
+            key=lambda x: int(re_model_save_path.match(x).group(2)), reverse=True
+        )
         match = re_model_save_path.match(saved_models[0])
         epoch, savetime = int(match.group(2)), int(match.group(3))
         return saved_models[0], epoch, savetime
@@ -320,10 +350,11 @@ def setup_model(cfg, device, world_size, rank):
     model.to(device)
 
     # Wrap the model using DDP
-    if world_size > 1:
+    if dist.is_initialized():
         model = DDP(model, device_ids=[rank])
         # Replace BatchNorm to SyncBatchNorm in distributed training setting
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        dist.barrier()
         logging.info(f"Model set up with DDP on rank {rank}.")
 
     logging.info(f"Model setup complete. Model moved to {device}.")
@@ -366,7 +397,8 @@ def setup_loss(cfg):
     """
     assert "losses" in cfg, "Configuration must include 'losses'."
 
-    combined_loss_functions = []
+    loss_fns = []
+    weights = []
 
     for loss_cfg in cfg["losses"]:
         loss_class = loss_cfg["class"]
@@ -380,13 +412,10 @@ def setup_loss(cfg):
             loss = wrapper
 
         weight = loss_cfg.get("weight", 1.0)
-        combined_loss_functions.append((loss, weight))
+        loss_fns.append(loss)
+        weights.append(weight)
 
-    def combined_loss_fn(outputs, targets):
-        return sum(
-            weight * loss_fn(outputs, targets) for loss_fn, weight in combined_loss_functions
-        )
-
+    combined_loss_fn = CombinedLoss(loss_fns, weights)
     logging.info("Loss functions are set up.")
     return combined_loss_fn
 
@@ -519,7 +548,7 @@ def setup_scheduler(cfg, optimizer):
     return scheduler
 
 
-def train_one_epoch(model, dataloader, transforms, loss_fn, optimizer, device, epoch, world_size):
+def train_one_epoch(model, dataloader, transforms, loss_fn, optimizer, device, epoch):
     # torch.autograd.set_detect_anomaly(True)
     model.train()
 
@@ -546,7 +575,9 @@ def train_one_epoch(model, dataloader, transforms, loss_fn, optimizer, device, e
         try:
             length = len(dl)  # Number of batches
             data_iters.append(iter(dl))
-            dataloader_indices.extend([i_dl] * length)  # Extend with the index of the dataloader
+            dataloader_indices.extend(
+                [i_dl] * length
+            )  # Extend with the index of the dataloader
             dl_total_loss.append(0.0)
         except TypeError:
             # Iterable dataset without __len__ is not directly supported by this weighted approach
@@ -583,7 +614,7 @@ def train_one_epoch(model, dataloader, transforms, loss_fn, optimizer, device, e
         z2 = model(v2)
 
         # Backward pass and optimize
-        if world_size > 1:
+        if dist.is_initialized():
             z1_full = gather_embeddings(z1)
             z2_full = gather_embeddings(z2)
             loss = loss_fn(z1_full, z2_full)
@@ -618,7 +649,9 @@ def save_model(model, optimizer, scheduler, path):
     logging.info(f"Model saved to {path}")
 
 
-def periodic_save_model(model, optimizer, scheduler, epoch, start_time, last_save_time, cfg):
+def periodic_save_model(
+    model, optimizer, scheduler, epoch, start_time, last_save_time, cfg
+):
     """
     Saves the model periodically based on epoch frequency or time frequency as specified in the configuration.
 
@@ -643,7 +676,9 @@ def periodic_save_model(model, optimizer, scheduler, epoch, start_time, last_sav
     model_time = current_time - start_time
     if save_every_n_epochs is not None and (epoch + 1) % save_every_n_epochs == 0:
         model_save_path = model_save_path.replace(".pth", "")
-        periodic_save_path = f"{model_save_path}_epoch_{epoch + 1}_time_{int(model_time)}.pth"
+        periodic_save_path = (
+            f"{model_save_path}_epoch_{epoch + 1}_time_{int(model_time)}.pth"
+        )
         save_model(model, optimizer, scheduler, periodic_save_path)
 
     # Periodic saving based on time
@@ -652,7 +687,9 @@ def periodic_save_model(model, optimizer, scheduler, epoch, start_time, last_sav
         > int((last_save_time - start_time) // save_time_span)
     ):
         model_save_path = model_save_path.replace(".pth", "")
-        periodic_save_path = f"{model_save_path}_epoch_{epoch + 1}_time_{int(model_time)}.pth"
+        periodic_save_path = (
+            f"{model_save_path}_epoch_{epoch + 1}_time_{int(model_time)}.pth"
+        )
         save_model(model, optimizer, scheduler, periodic_save_path)
         last_save_time = current_time  # Update last save time
 

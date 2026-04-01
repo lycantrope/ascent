@@ -6,7 +6,7 @@ import torch
 import torch.multiprocessing as mp
 
 from ascent.tools.train_helper import (
-    cleanup_ddp,
+    cleanup,
     parse_args,
     periodic_save_model,
     save_model,
@@ -117,7 +117,6 @@ def train_model(rank, world_size, config, **kwargs):
             optimizer,
             device,
             epoch,
-            world_size,
         )
 
         # Tensorboard logging and model saving should be done only by rank 0
@@ -183,6 +182,7 @@ def train_model(rank, world_size, config, **kwargs):
     logging.info("Training completed.")
 
 
+@cleanup
 def main():
     parser = argparse.ArgumentParser()
     # config file path
@@ -195,15 +195,12 @@ def main():
     if args.disable_ddp or world_size < 2:
         train_model(0, 1, args.config)
     else:
-        try:
-            mp.spawn(  # type: ignore
-                train_model,
-                args=(world_size, args.config),
-                nprocs=world_size,
-                join=True,
-            )
-        finally:
-            cleanup_ddp()
+        mp.spawn(  # type: ignore
+            train_model,
+            args=(world_size, args.config),
+            nprocs=world_size,
+            join=True,
+        )
 
 
 if __name__ == "__main__":

@@ -36,7 +36,9 @@ class NT_Xent(nn.Module):
 
         # Concatenate embeddings from both views.
         z = torch.cat((z1, z2), dim=0)  # shape: (2N', D)
-        sim = self.sim_f(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature  # (2N', 2N')
+        sim = (
+            self.sim_f(z.unsqueeze(1), z.unsqueeze(0)) / self.temperature
+        )  # (2N', 2N')
 
         # Extract positive similarities: off-diagonals between z1 and z2.
         sim_i_j = torch.diag(sim, N)
@@ -72,25 +74,53 @@ class NT_Xent(nn.Module):
             return self._forward_single(z1, z2)
 
 
+class CombinedLoss(torch.nn.Module):
+    def __init__(self, loss_functions, weights):
+        super().__init__()
+        self.loss_fns = torch.nn.ModuleList(loss_functions)
+        # Register weights as a buffer so they move to GPU with the model
+        self.register_buffer("weights", torch.tensor(weights))
+
+    def forward(self, outputs, targets):
+        # 1. Execute all losses (this is the "expansion")
+        # Each loss_fn(outputs, targets) returns a scalar 0-dim tensor
+        losses = torch.stack([fn(outputs, targets) for fn in self.loss_fns])
+
+        # 2. Multiply by weights and sum in one go
+        # This is mathematically: (w1*l1 + w2*l2 + ... + wn*ln)
+        return torch.dot(losses, self.weights)  # type: ignore
+
+
 if __name__ == "__main__":
     lossfunc = NT_Xent(0.5)
 
     # Case 1: Perfect match.
-    z1 = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=torch.float)
-    z2 = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=torch.float)
+    z1 = torch.tensor(
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=torch.float
+    )
+    z2 = torch.tensor(
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=torch.float
+    )
     loss = lossfunc(z1, z2)
     print("Case 1: Perfect match. Loss={}".format(loss.item()))
 
     # Case 2: Perfect mismatch.
-    z1 = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=float)
-    z2 = torch.tensor([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]], dtype=float)
+    z1 = torch.tensor(
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=float
+    )
+    z2 = torch.tensor(
+        [[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]], dtype=float
+    )
     loss = lossfunc(z1, z2)
     print("Case 2: Perfect mismatch. Loss={}".format(loss.item()))
 
     # Case 3: Partial match.
-    z1 = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=float)
+    z1 = torch.tensor(
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=float
+    )
     z2 = torch.tensor(
-        [[0.9, 0.1, 0, 0], [0.1, 0.9, 0, 0], [0, 0, 0.9, 0.1], [0, 0, 0.1, 0.9]], dtype=float
+        [[0.9, 0.1, 0, 0], [0.1, 0.9, 0, 0], [0, 0, 0.9, 0.1], [0, 0, 0.1, 0.9]],
+        dtype=float,
     )
     loss = lossfunc(z1, z2)
     print("Case 3: Partial match. Loss={}".format(loss))
@@ -100,7 +130,9 @@ if __name__ == "__main__":
     z2 = torch.tensor([[0.9, 0.1, 0, 0], [0, 0, 0.1, 0.9]], dtype=float)
     loss = lossfunc(z1, z2)
     print(
-        "Case 4: Partial match with masking outside of loss function. Loss={}".format(loss.item())
+        "Case 4: Partial match with masking outside of loss function. Loss={}".format(
+            loss.item()
+        )
     )
 
     # Case 5: With masks (auto).
@@ -125,4 +157,8 @@ if __name__ == "__main__":
     mask1 = torch.tensor([0, 1, 0, 0], dtype=torch.int)
     mask2 = torch.tensor([0, 0, 1, 0], dtype=torch.int)
     loss = lossfunc(z1, z2)
-    print("Case 5: Partial match with masking in loss function. Loss={}".format(loss.item()))
+    print(
+        "Case 5: Partial match with masking in loss function. Loss={}".format(
+            loss.item()
+        )
+    )

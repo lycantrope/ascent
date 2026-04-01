@@ -9,6 +9,8 @@ class AllGather(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, tensor_list: list[torch.Tensor], tensor: torch.Tensor):
+        ctx.rank = dist.get_rank()
+        ctx.world_size = dist.get_world_size()
         dist.all_gather([t.contiguous() for t in tensor_list], tensor.contiguous())
         return tuple(tensor_list)
 

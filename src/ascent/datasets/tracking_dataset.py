@@ -17,15 +17,31 @@ from torch.utils.data import Dataset
 class OEDItem(dict):
     def __init__(
         self,
-        t: int,
-        image: torch.Tensor,
-        object_ids: torch.Tensor,
-        coords: torch.Tensor,
+        data=None,
+        *,
+        t: int = -1,
+        image: torch.Tensor | None = None,
+        object_ids: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
         spacing: torch.Tensor = torch.tensor([1.0, 1.0, 1.0]),
         n_max_objects: int | None = None,
     ):
-        super().__init__()
+
+        if data is not None:
+            super().__init__(data)
+        else:
+            super().__init__()
+
+        t = self.get("t", t)
+        image = self.get("image", image)
+        object_ids = self.get("object_ids", object_ids)
+        coords = self.get("coords", coords)
+        spacing = self.get("spacing", spacing)
+        n_max_objects = self.get("n_max_objects", n_max_objects)
+
         assert torch.is_tensor(image), "image must be a tensor"
+        assert torch.is_tensor(object_ids), "object_ids must be a tensor"
+        assert torch.is_tensor(coords), "coords must be a tensor"
 
         self["t"] = t
         self["image"] = image
@@ -393,7 +409,14 @@ class ObjectEmbeddingDataset3D(Dataset):
             [(z, y, x) for obj_id, t, z, y, x in objects],
             dtype=torch.float32,
         )
-        return OEDItem(t, image, object_ids, coords, self.spacing, self.max_objects)
+        return OEDItem(
+            t=t,
+            image=image,
+            object_ids=object_ids,
+            coords=coords,
+            spacing=self.spacing,
+            n_max_objects=self.max_objects,
+        )
 
     def __len__(self):
         return len(self.objects_by_frame.keys())

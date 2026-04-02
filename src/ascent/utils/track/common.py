@@ -1,6 +1,7 @@
 import logging
 import os
 from collections import defaultdict
+from typing import Any, Iterator, Sequence
 
 import h5py
 import numpy as np
@@ -10,17 +11,22 @@ from scipy.ndimage import center_of_mass
 from scipy.spatial import distance
 
 
-# DoubleEndedLinkedList
 class Spot:
-    def __init__(self, spot_id: str, t, coord=None):
+    def __init__(self, spot_id: str, t, coord: Sequence[float] = ()):
         self.id: str = spot_id
         self.t = t
         self.coord = coord
         self.next: Spot | None = None
         self.prev: Spot | None = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Spot({self.id}, t={self.t})"
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, type(self)) and self.id == other.id
+
+    def __hash__(self):
+        return hash(self.id)
 
 
 # Head for iteration
@@ -46,7 +52,7 @@ class Track:
         self.head: Spot | None = None
         self.tail: Spot | None = None
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Spot]:
         if self.head is None:
             return iter([])
         return TrackIterator(self.head)

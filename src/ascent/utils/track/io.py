@@ -2,11 +2,15 @@ import logging
 import os
 
 import pandas as pd
+
 from ascent.utils.track.common import Spot, Track
 
 
 def read_spots_trackmate(
-    path_spots: str, path_tracks: str = None, filter_spots_in_track=True, **kwargs
+    path_spots: str,
+    path_tracks: str | None = None,
+    filter_spots_in_track=True,
+    **kwargs,
 ) -> pd.DataFrame:
     """
     Read the spots CSV file and return a pandas DataFrame with the spots.
@@ -54,7 +58,9 @@ def read_tracks_trackmate(
 
     tracks = {}
     if path_tracks is None:
-        df_s = pd.read_csv(path_spots, index_col=0, skiprows=skiprows, dtype={"TRACK_ID": int})
+        df_s = pd.read_csv(
+            path_spots, index_col=0, skiprows=skiprows, dtype={"TRACK_ID": int}
+        )
         df_s.sort_values("TRACK_ID", inplace=True)
         frames = list(df_s["FRAME"].unique())
         frames.sort()
@@ -116,9 +122,13 @@ def save_tracks_napari(tracks: dict[str, Track], path_output: str):
                         f"{track_id},{spot.id},{spot.t},{spot.coord[0]},{spot.coord[1]},{spot.coord[2]}\n"
                     )
                 elif len(spot.coord) == 2:
-                    f.write(f"{track_id},{spot.id},{spot.t},{0},{spot.coord[0]},{spot.coord[1]}\n")
+                    f.write(
+                        f"{track_id},{spot.id},{spot.t},{0},{spot.coord[0]},{spot.coord[1]}\n"
+                    )
                 else:
-                    raise Exception(f"len(spot.coord) must be 2 or 3. {len(spot.coord)} is given.")
+                    raise Exception(
+                        f"len(spot.coord) must be 2 or 3. {len(spot.coord)} is given."
+                    )
 
 
 def read_tracks_napari(path_tracks: str) -> dict[str, Track]:
@@ -172,7 +182,9 @@ def tracks_napari_to_trackmate_xml(path_tracks, path_out):
     # Spots
     spot_index = 0
     map_spot_id_index = {}
-    xml_text = f'    <AllSpots nspots="{sum([len(track) for track in tracks.values()])}">'
+    xml_text = (
+        f'    <AllSpots nspots="{sum([len(track) for track in tracks.values()])}">'
+    )
     for t in list_t:
         xml_text += f'\n      <SpotsInFrame frame="{t}">'
         for track_id, track in tracks.items():
@@ -240,13 +252,19 @@ def print_track_errors(track_error, log_file, print_detail=True):
         log_file_ext = os.path.splitext(log_file_basename)[1]
         log_file_dir = os.path.dirname(log_file)
         log_file_name = os.path.splitext(log_file_basename)[0]
-        log_file_detail = os.path.join(log_file_dir, log_file_name + "_detail" + log_file_ext)
+        log_file_detail = os.path.join(
+            log_file_dir, log_file_name + "_detail" + log_file_ext
+        )
         with open(log_file_detail, "w") as f:
             # Write the details by tracks
             f.write("\n" + "-" * 30 + "Track by track detail (GT)" + "-" * 30 + "\n")
-            tid_val_list = [(tid, val) for tid, val in track_error["details_by_track_gt"].items()]
+            tid_val_list = [
+                (tid, val) for tid, val in track_error["details_by_track_gt"].items()
+            ]
             tid_val_list.sort(key=lambda x: x[1]["total"], reverse=True)
-            have_pred_track_id = len(tid_val_list) > 0 and "pred_track_id" in tid_val_list[0][1]
+            have_pred_track_id = (
+                len(tid_val_list) > 0 and "pred_track_id" in tid_val_list[0][1]
+            )
             if have_pred_track_id:
                 f.write("GT Track\tPred Track\tTotal\t\tMismatch\tMissing\n")
             else:
@@ -274,9 +292,13 @@ def print_track_errors(track_error, log_file, print_detail=True):
 
             # Write the details by tracks
             f.write("\n" + "-" * 30 + "Track by track detail (Pred)" + "-" * 30 + "\n")
-            tid_val_list = [(tid, val) for tid, val in track_error["details_by_track_pred"].items()]
+            tid_val_list = [
+                (tid, val) for tid, val in track_error["details_by_track_pred"].items()
+            ]
             tid_val_list.sort(key=lambda x: x[1]["total"], reverse=True)
-            have_gt_track_id = len(tid_val_list) > 0 and "gt_track_id" in tid_val_list[0][1]
+            have_gt_track_id = (
+                len(tid_val_list) > 0 and "gt_track_id" in tid_val_list[0][1]
+            )
             if have_gt_track_id:
                 f.write("Pred Track\tGT Track\tTotal\t\tMismatch\n")
             else:

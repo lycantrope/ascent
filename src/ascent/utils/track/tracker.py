@@ -54,12 +54,6 @@ class HT_Object(Spot):
     def __repr__(self):
         return str(self)
 
-    def __hash__(self):
-        return hash(self.id)
-
-    def __eq__(self, other: Spot):
-        return self.id == other.id
-
 
 class HT_Track(Track):
     """
@@ -94,7 +88,9 @@ class HT_Track(Track):
         Append a new object and update the representative vectors.
     """
 
-    def __init__(self, id: str, object: HT_Object, momentum: float = 0.5, update_vectors=True):
+    def __init__(
+        self, id: str, object: HT_Object, momentum: float = 0.5, update_vectors=True
+    ):
         Track.__init__(self, id)
         self.objects = []
         self.v = None  # representative volume embedding vector(s)
@@ -114,7 +110,9 @@ class HT_Track(Track):
                 if self.v is None:
                     self.v = obj.z.unsqueeze(0)
                 else:
-                    self.v = self.momentum * self.v + (1 - self.momentum) * obj.z.unsqueeze(0)
+                    self.v = self.momentum * self.v + (
+                        1 - self.momentum
+                    ) * obj.z.unsqueeze(0)
 
         # self.objects[-1].to("cpu")
 
@@ -247,7 +245,13 @@ class HungarianTracker:
         logging.debug(f"Loading objects from {file_objects}")
         df_objects = pd.read_csv(
             file_objects,
-            dtype={"object_id": "str", "t": "int", "x": "float", "y": "float", "z": "float"},
+            dtype={
+                "object_id": "str",
+                "t": "int",
+                "x": "float",
+                "y": "float",
+                "z": "float",
+            },
         )
         df_objects.sort_values("t", inplace=True, ignore_index=True)
         object_ids = df_objects["object_id"].values
@@ -262,14 +266,22 @@ class HungarianTracker:
             arr = np.load(file_z)
             Z = torch.tensor(arr, dtype=torch.float32, device=device)
         else:
-            raise ValueError("Unknown volume embedding file format. Supported: .pt/.pth, .npy")
+            raise ValueError(
+                "Unknown volume embedding file format. Supported: .pt/.pth, .npy"
+            )
         logging.debug(f"Loaded {Z.shape[0]} volume embeddings.")
         if Z.shape[0] != len(df_objects):
-            raise ValueError("Number of volume embedding vectors does not match number of objects.")
+            raise ValueError(
+                "Number of volume embedding vectors does not match number of objects."
+            )
 
         if file_object_ids_z is not None:
-            logging.debug(f"Loading object IDs for volume embeddings from {file_object_ids_z}")
-            pt_object_ids = torch.load(file_object_ids_z, map_location="cpu", weights_only=True)
+            logging.debug(
+                f"Loading object IDs for volume embeddings from {file_object_ids_z}"
+            )
+            pt_object_ids = torch.load(
+                file_object_ids_z, map_location="cpu", weights_only=True
+            )
             # cast object IDs to string
             pt_object_ids = [str(obj_id) for obj_id in pt_object_ids]
             logging.debug(f"Loaded {len(pt_object_ids)} object IDs.")
@@ -284,7 +296,9 @@ class HungarianTracker:
             obj_id = row["object_id"]
             t = row["t"]
             coords = (row["z"], row["y"], row["x"])  # (z, y, x)
-            z_idx = map_obj_id_to_z_idx[obj_id] if map_obj_id_to_z_idx is not None else i
+            z_idx = (
+                map_obj_id_to_z_idx[obj_id] if map_obj_id_to_z_idx is not None else i
+            )
             z_vec = Z[z_idx]
             obj = HT_Object(obj_id, t, coords, z_vec)
             objects.append(obj)
@@ -343,13 +357,18 @@ class HungarianTracker:
             cost_matrix = None
             v_tracks = [track.v for track in active_tracks if track.v is not None]
             if len(v_tracks) > 0:
-                v_tracks_cat = torch.cat(v_tracks).unsqueeze(1)  # (len(v_tracks), 1, feat)
+                v_tracks_cat = torch.cat(v_tracks).unsqueeze(
+                    1
+                )  # (len(v_tracks), 1, feat)
                 v_objects = torch.stack(
                     [obj.z for obj in new_objects if obj.z is not None]
                 ).unsqueeze(0)
 
                 # calculate Cosine Similarity and eventual normalized similarity
-                pred_CS = F.cosine_similarity(v_tracks_cat, v_objects, dim=2) / self.temperature
+                pred_CS = (
+                    F.cosine_similarity(v_tracks_cat, v_objects, dim=2)
+                    / self.temperature
+                )
                 # apply row-wise softmax and column-wise softmax and average the two
                 pred_CS_sm_r = F.softmax(pred_CS, dim=0)
                 pred_CS_sm_c = F.softmax(pred_CS, dim=1)
@@ -424,6 +443,7 @@ class HungarianTracker:
                     f.write(
                         f"{track.id},{obj.id},{obj.t},{obj.coord[0]},{obj.coord[1]},{obj.coord[2]}\n"
                     )
+
 
 if __name__ == "__main__":
     pass

@@ -64,7 +64,7 @@ def train_model(rank, world_size, config, **kwargs):
     model = setup_model(cfg, device, world_size, rank)
 
     # set up loss funcion
-    loss_fn = setup_loss(cfg)
+    loss_fn = setup_loss(cfg, device)
 
     # set up optimizer and scheduler
     # read https://pytorch.org/docs/stable/optim.html for basic introduction to optimizers in pytorch

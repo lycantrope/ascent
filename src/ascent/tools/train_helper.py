@@ -361,7 +361,7 @@ def setup_model(cfg, device, world_size, rank):
     return model
 
 
-def setup_loss(cfg):
+def setup_loss(cfg, device):
     """
     Initializes one or more loss functions based on the provided configuration, supporting the use of custom
     wrappers as specified through separate configurations. This function accommodates complex loss computation
@@ -370,6 +370,8 @@ def setup_loss(cfg):
     Args:
         cfg (dict): Configuration dictionary containing settings for one or more loss functions,
                     including their classes, initialization parameters, and optional wrappers.
+
+        device (str): The device to move the ComposedLoss to ('cpu', 'cuda', 'mps', etc.).
 
     Returns:
         A function that, when called with predictions and targets, computes either a single loss or
@@ -417,7 +419,7 @@ def setup_loss(cfg):
 
     combined_loss_fn = CombinedLoss(loss_fns, weights)
     logging.info("Loss functions are set up.")
-    return combined_loss_fn
+    return combined_loss_fn.to(device)
 
 
 def setup_optimizer(cfg, model):

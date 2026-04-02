@@ -18,6 +18,7 @@ dependencies = [
     "torchvision",
     "zarr<3",
     "numcodecs<0.16",
+    "threadpoolctl",
 ]
 
 

@@ -1,6 +1,9 @@
 import logging
 import os
+from collections import defaultdict
+from typing import Sequence
 
+import numpy as np
 import pandas as pd
 
 from ascent.utils.track.common import Spot, Track
@@ -105,30 +108,59 @@ def read_tracks_trackmate(
     return tracks
 
 
-def save_tracks_napari(tracks: dict[str, Track], path_output: str):
+def save_tracks_napari(
+    file_output_tracks: os.PathLike | str,
+    tracks: Sequence[Track],
+) -> None:
     """
-    Save the tracks to a CSV file in the format used by Napari.
+    Save the resulting tracks to a Napari-compatible track CSV file.
+    """
+    assert len(tracks), "Input tracks is empty"
 
-    Args:
-        tracks: Dictionary of tracks
-        path_output: Path to the output CSV file
-    """
-    with open(path_output, "w") as f:
-        f.write("TrackID,ObjectID,t,z,y,x\n")
-        for track_id, track in tracks.items():
-            for spot in track:
-                if len(spot.coord) == 3:
-                    f.write(
-                        f"{track_id},{spot.id},{spot.t},{spot.coord[0]},{spot.coord[1]},{spot.coord[2]}\n"
-                    )
-                elif len(spot.coord) == 2:
-                    f.write(
-                        f"{track_id},{spot.id},{spot.t},{0},{spot.coord[0]},{spot.coord[1]}\n"
-                    )
-                else:
-                    raise Exception(
-                        f"len(spot.coord) must be 2 or 3. {len(spot.coord)} is given."
-                    )
+    # We retrieve the first object in the tracks
+    spot = next((obj for track in tracks for obj in track))
+    assert isinstance(spot, Spot), "Empty Track"
+
+    # Inspect the dimension of coordinates
+    if len(spot.coord) not in (2, 3):
+        raise ValueError(f"len(spot.coord) must be 2 or 3. {len(spot.coord)} is given.")
+
+    if len(spot.coord) == 2:
+        flatten_spot = (
+            (track.id, obj.id, obj.t, 0, obj.coord[0], obj.coord[1])
+            for track in tracks
+            for obj in track
+        )
+
+    else:
+        flatten_spot = (
+            (track.id, obj.id, obj.t, obj.coord[0], obj.coord[1], obj.coord[2])
+            for track in tracks
+            for obj in track
+        )
+
+    header = "TrackID,ObjectID,t,z,y,x"
+    # TrackID and ObjectID accepts up to 16 characters; any characters beyond that will be truncated.
+    dtype = np.dtype(
+        [
+            ("TrackID", "U16"),
+            ("ObjectID", "U16"),
+            ("t", "i8"),
+            ("z", "f8"),
+            ("y", "f8"),
+            ("x", "f8"),
+        ]
+    )
+    tracks_arr = np.array(list(flatten_spot), dtype=dtype)
+    np.savetxt(
+        file_output_tracks,
+        tracks_arr,
+        ["%s", "%s", "%d", "%d", "%d", "%d"],
+        delimiter=",",
+        header=header,
+        comments="",
+        encoding="utf8",
+    )
 
 
 def read_tracks_napari(path_tracks: str) -> dict[str, Track]:
@@ -141,15 +173,23 @@ def read_tracks_napari(path_tracks: str) -> dict[str, Track]:
     Returns:
         Dictionary of tracks
     """
-    tracks = {}
-    with open(path_tracks, "r") as f:
-        next(f)  # Skip the header
-        for line in f:
-            track_id, spot_id, t, z, y, x = line.strip().split(",")
-            if track_id not in tracks:
-                tracks[track_id] = Track(track_id)
-            spot = Spot(spot_id, int(t), (float(z), float(y), float(x)))
-            tracks[track_id].add(spot)
+    dtype = np.dtype(
+        [
+            ("TrackID", "U16"),
+            ("ObjectID", "U16"),
+            ("t", "i8"),
+            ("z", "f8"),
+            ("y", "f8"),
+            ("x", "f8"),
+        ]
+    )
+    tracks_arr = np.loadtxt(path_tracks, dtype=dtype, delimiter=",", skiprows=1)
+    tracks = {
+        track_id: Track(track_id) for track_id in np.unique(tracks_arr["TrackID"])
+    }
+    for track_id, spot_id, t, z, y, x in tracks_arr:
+        spot = Spot(spot_id, t, (z, y, x))
+        tracks[track_id].add(spot)
     return tracks
 
 
@@ -173,11 +213,14 @@ def detection_to_trackmate_xml(path_in_coords, path_out):
 
 def tracks_napari_to_trackmate_xml(path_tracks, path_out):
     tracks = read_tracks_napari(path_tracks)
-    list_t = []
+
+    # Grouping spots by timestamp
+    grouped_spots_by_t = defaultdict(list)
     for track in tracks.values():
-        list_t.extend([spot.t for spot in track])
-    list_t = list(set(list_t))
-    list_t.sort()
+        for spot in track:
+            grouped_spots_by_t[spot.t].append(spot)
+
+    list_t = sorted(grouped_spots_by_t.keys())
 
     # Spots
     spot_index = 0
@@ -187,13 +230,11 @@ def tracks_napari_to_trackmate_xml(path_tracks, path_out):
     )
     for t in list_t:
         xml_text += f'\n      <SpotsInFrame frame="{t}">'
-        for track_id, track in tracks.items():
-            for spot in track:
-                if spot.t == t:
-                    xml_text += f'\n        <Spot ID="{spot_index}" name="{spot.id}" VISIBILITY="1" RADIUS="3" QUALITY="1.0" FRAME="{spot.t:.0f}" '
-                    xml_text += f'POSITION_T="{spot.t}" POSITION_X="{spot.coord[2]:.1f}" POSITION_Y="{spot.coord[1]:.1f}" POSITION_Z="{spot.coord[0]:.1f}" />'
-                    map_spot_id_index[spot.id] = spot_index
-                    spot_index += 1
+        for spot in grouped_spots_by_t[t]:
+            xml_text += f'\n        <Spot ID="{spot_index}" name="{spot.id}" VISIBILITY="1" RADIUS="3" QUALITY="1.0" FRAME="{spot.t:.0f}" '
+            xml_text += f'POSITION_T="{spot.t}" POSITION_X="{spot.coord[2]:.1f}" POSITION_Y="{spot.coord[1]:.1f}" POSITION_Z="{spot.coord[0]:.1f}" />'
+            map_spot_id_index[spot.id] = spot_index
+            spot_index += 1
         xml_text += "\n      </SpotsInFrame>"
     xml_text += "\n    </AllSpots>"
 
@@ -201,6 +242,8 @@ def tracks_napari_to_trackmate_xml(path_tracks, path_out):
     xml_text += "\n    <AllTracks>"
     list_track_index = []
     for i, (track_id, track) in enumerate(tracks.items()):
+        if track.head is None or track.tail is None:
+            continue
         track_start = track.head.t
         track_stop = track.tail.t
         track_duration = track_stop - track_start
@@ -208,15 +251,17 @@ def tracks_napari_to_trackmate_xml(path_tracks, path_out):
         xml_text += f'TRACK_DURATION="{track_duration:.1f}" TRACK_START="{track_start:.1f}" TRACK_STOP="{track_stop:.1f}" >'
         list_track_index.append(i)
         for spot in track:
-            if spot.next is not None:
-                curr_spot_index = map_spot_id_index[spot.id]
-                next_spot_index = map_spot_id_index[spot.next.id]
-                edge_x = (spot.coord[2] + spot.next.coord[2]) / 2
-                edge_y = (spot.coord[1] + spot.next.coord[1]) / 2
-                edge_z = (spot.coord[0] + spot.next.coord[0]) / 2
-                edge_t = (spot.t + spot.next.t) / 2
-                xml_text += f'\n        <Edge SPOT_SOURCE_ID="{curr_spot_index}" SPOT_TARGET_ID="{next_spot_index}" '
-                xml_text += f'EDGE_TIME="{edge_t}" EDGE_X_LOCATION="{edge_x}" EDGE_Y_LOCATION="{edge_y}" EDGE_Z_LOCATION="{edge_z}" />'
+            if spot.next is None:
+                # tail spot, break the loop
+                break
+            curr_spot_index = map_spot_id_index[spot.id]
+            next_spot_index = map_spot_id_index[spot.next.id]
+            edge_x = (spot.coord[2] + spot.next.coord[2]) / 2
+            edge_y = (spot.coord[1] + spot.next.coord[1]) / 2
+            edge_z = (spot.coord[0] + spot.next.coord[0]) / 2
+            edge_t = (spot.t + spot.next.t) / 2
+            xml_text += f'\n        <Edge SPOT_SOURCE_ID="{curr_spot_index}" SPOT_TARGET_ID="{next_spot_index}" '
+            xml_text += f'EDGE_TIME="{edge_t}" EDGE_X_LOCATION="{edge_x}" EDGE_Y_LOCATION="{edge_y}" EDGE_Z_LOCATION="{edge_z}" />'
         xml_text += "\n      </Track>"
     xml_text += "\n    </AllTracks>"
 
@@ -247,101 +292,101 @@ def print_track_errors(track_error, log_file, print_detail=True):
             f"MOTA: {MOTA:.4f}, Mismatch ratio: {mismatch_ratio:.4f}, Missing ratio: {missing_ratio:.4f}\n"
         )
 
-    if print_detail:
-        log_file_basename = os.path.basename(log_file)
-        log_file_ext = os.path.splitext(log_file_basename)[1]
-        log_file_dir = os.path.dirname(log_file)
-        log_file_name = os.path.splitext(log_file_basename)[0]
-        log_file_detail = os.path.join(
-            log_file_dir, log_file_name + "_detail" + log_file_ext
+    if not print_detail:
+        return
+
+    log_file_basename = os.path.basename(log_file)
+    log_file_ext = os.path.splitext(log_file_basename)[1]
+    log_file_dir = os.path.dirname(log_file)
+    log_file_name = os.path.splitext(log_file_basename)[0]
+    log_file_detail = os.path.join(
+        log_file_dir, log_file_name + "_detail" + log_file_ext
+    )
+    with open(log_file_detail, "w") as f:
+        # Write the details by tracks
+        f.write("\n" + "-" * 30 + "Track by track detail (GT)" + "-" * 30 + "\n")
+        tid_val_list = [
+            (tid, val) for tid, val in track_error["details_by_track_gt"].items()
+        ]
+        tid_val_list.sort(key=lambda x: x[1]["total"], reverse=True)
+        have_pred_track_id = (
+            len(tid_val_list) > 0 and "pred_track_id" in tid_val_list[0][1]
         )
-        with open(log_file_detail, "w") as f:
-            # Write the details by tracks
-            f.write("\n" + "-" * 30 + "Track by track detail (GT)" + "-" * 30 + "\n")
-            tid_val_list = [
-                (tid, val) for tid, val in track_error["details_by_track_gt"].items()
-            ]
-            tid_val_list.sort(key=lambda x: x[1]["total"], reverse=True)
-            have_pred_track_id = (
-                len(tid_val_list) > 0 and "pred_track_id" in tid_val_list[0][1]
-            )
+        if have_pred_track_id:
+            f.write("GT Track\tPred Track\tTotal\t\tMismatch\tMissing\n")
+        else:
+            f.write("GT Track\tTotal\t\tMismatch\tMissing\n")
+        for track_id, val in tid_val_list:
+            total = val["total"]
+            mismatch = val["mismatch"]
+            missing = val["missing"]
             if have_pred_track_id:
-                f.write("GT Track\tPred Track\tTotal\t\tMismatch\tMissing\n")
+                pred_track_id = val["pred_track_id"]
+                f.write(
+                    f"{track_id}\t\t{pred_track_id}\t\t{total}\t\t{mismatch}\t\t{missing}\n"
+                )
             else:
-                f.write("GT Track\tTotal\t\tMismatch\tMissing\n")
+                f.write(f"{track_id}\t\t{total}\t\t{mismatch}\t\t{missing}\n")
+
+        # Write the log of the GT tracks
+        if len(tid_val_list) > 0 and "log" in tid_val_list[0][1]:
+            f.write("\n" + "-" * 30 + "GT Track log" + "-" * 30 + "\n")
             for track_id, val in tid_val_list:
-                total = val["total"]
-                mismatch = val["mismatch"]
-                missing = val["missing"]
-                if have_pred_track_id:
-                    pred_track_id = val["pred_track_id"]
+                log = val["log"]
+                pred_track_id = val["pred_track_id"]
+                f.write(f"Track {track_id} ({pred_track_id}):\n")
+                f.write(log + "\n")
+
+        # Write the details by tracks
+        f.write("\n" + "-" * 30 + "Track by track detail (Pred)" + "-" * 30 + "\n")
+        tid_val_list = [
+            (tid, val) for tid, val in track_error["details_by_track_pred"].items()
+        ]
+        tid_val_list.sort(key=lambda x: x[1]["total"], reverse=True)
+        have_gt_track_id = len(tid_val_list) > 0 and "gt_track_id" in tid_val_list[0][1]
+        if have_gt_track_id:
+            f.write("Pred Track\tGT Track\tTotal\t\tMismatch\n")
+        else:
+            f.write("Pred Track\tTotal\t\tMismatch\n")
+        for track_id, val in tid_val_list:
+            total = val["total"]
+            mismatch = val["mismatch"]
+            if have_gt_track_id:
+                gt_track_id = val["gt_track_id"]
+                f.write(f"{track_id}\t\t{gt_track_id}\t\t{total}\t\t{mismatch}\n")
+            else:
+                f.write(f"{track_id}\t\t{total}\t\t{mismatch}\n")
+
+        # Write the log of the pred tracks
+        if len(tid_val_list) > 0 and "log" in tid_val_list[0][1]:
+            f.write("\n" + "-" * 30 + "Pred Track log" + "-" * 30 + "\n")
+            tid_val_list.sort(key=lambda x: x[1]["gt_track_id"])
+            for track_id, val in tid_val_list:
+                log = val["log"]
+                gt_track_id = val["gt_track_id"]
+                f.write(f"Track {track_id} ({gt_track_id}): \n")
+                f.write(log + "\n")
+
+        # Write the details by frame
+        f.write("\n" + "-" * 30 + "Frame by frame detail" + "-" * 30 + "\n")
+        f.write("Frame\t\tMismatch\t\tMissing\n")
+        for t, val in details_by_frame.items():
+            mismatch = val["mismatch"]
+            missing = val["missing"]
+            f.write(f"{t}\t\t{len(mismatch)}\t\t{len(missing)}\n")
+        f.write("\n" + "-" * 80 + "\n")
+        for t, val in details_by_frame.items():
+            mismatch = val["mismatch"]
+            missing = val["missing"]
+            f.write(f"Frame {t}:\n")
+            f.write(f"Missing spots: {', '.join(missing)}\n")
+            f.write("Mismatch\n")
+            for item in mismatch:
+                if "GTTrack" in item:
                     f.write(
-                        f"{track_id}\t\t{pred_track_id}\t\t{total}\t\t{mismatch}\t\t{missing}\n"
+                        f"Spot {item['Spot']} in GT track {item['GTTrack']} mismatched. True Pred track: {item['TruePredTrack']}, tracked Pred track: {item['TrackedPredTrack']}\n"
                     )
                 else:
-                    f.write(f"{track_id}\t\t{total}\t\t{mismatch}\t\t{missing}\n")
-
-            # Write the log of the GT tracks
-            if len(tid_val_list) > 0 and "log" in tid_val_list[0][1]:
-                f.write("\n" + "-" * 30 + "GT Track log" + "-" * 30 + "\n")
-                for track_id, val in tid_val_list:
-                    log = val["log"]
-                    pred_track_id = val["pred_track_id"]
-                    f.write(f"Track {track_id} ({pred_track_id}):\n")
-                    f.write(log + "\n")
-
-            # Write the details by tracks
-            f.write("\n" + "-" * 30 + "Track by track detail (Pred)" + "-" * 30 + "\n")
-            tid_val_list = [
-                (tid, val) for tid, val in track_error["details_by_track_pred"].items()
-            ]
-            tid_val_list.sort(key=lambda x: x[1]["total"], reverse=True)
-            have_gt_track_id = (
-                len(tid_val_list) > 0 and "gt_track_id" in tid_val_list[0][1]
-            )
-            if have_gt_track_id:
-                f.write("Pred Track\tGT Track\tTotal\t\tMismatch\n")
-            else:
-                f.write("Pred Track\tTotal\t\tMismatch\n")
-            for track_id, val in tid_val_list:
-                total = val["total"]
-                mismatch = val["mismatch"]
-                if have_gt_track_id:
-                    gt_track_id = val["gt_track_id"]
-                    f.write(f"{track_id}\t\t{gt_track_id}\t\t{total}\t\t{mismatch}\n")
-                else:
-                    f.write(f"{track_id}\t\t{total}\t\t{mismatch}\n")
-
-            # Write the log of the pred tracks
-            if len(tid_val_list) > 0 and "log" in tid_val_list[0][1]:
-                f.write("\n" + "-" * 30 + "Pred Track log" + "-" * 30 + "\n")
-                tid_val_list.sort(key=lambda x: x[1]["gt_track_id"])
-                for track_id, val in tid_val_list:
-                    log = val["log"]
-                    gt_track_id = val["gt_track_id"]
-                    f.write(f"Track {track_id} ({gt_track_id}): \n")
-                    f.write(log + "\n")
-
-            # Write the details by frame
-            f.write("\n" + "-" * 30 + "Frame by frame detail" + "-" * 30 + "\n")
-            f.write("Frame\t\tMismatch\t\tMissing\n")
-            for t, val in details_by_frame.items():
-                mismatch = val["mismatch"]
-                missing = val["missing"]
-                f.write(f"{t}\t\t{len(mismatch)}\t\t{len(missing)}\n")
-            f.write("\n" + "-" * 80 + "\n")
-            for t, val in details_by_frame.items():
-                mismatch = val["mismatch"]
-                missing = val["missing"]
-                f.write(f"Frame {t}:\n")
-                f.write(f"Missing spots: {', '.join(missing)}\n")
-                f.write("Mismatch\n")
-                for item in mismatch:
-                    if "GTTrack" in item:
-                        f.write(
-                            f"Spot {item['Spot']} in GT track {item['GTTrack']} mismatched. True Pred track: {item['TruePredTrack']}, tracked Pred track: {item['TrackedPredTrack']}\n"
-                        )
-                    else:
-                        f.write(
-                            f"Spot {item['Spot']} in pred track {item['PredTrack']} mismatched. True GT track: {item['TrueGTTrack']}, tracked GT track: {item['TrackedGTTrack']}\n"
-                        )
+                    f.write(
+                        f"Spot {item['Spot']} in pred track {item['PredTrack']} mismatched. True GT track: {item['TrueGTTrack']}, tracked GT track: {item['TrackedGTTrack']}\n"
+                    )

@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -89,10 +90,14 @@ class HT_Track(Track):
     """
 
     def __init__(
-        self, id: str, object: HT_Object, momentum: float = 0.5, update_vectors=True
+        self,
+        id: str,
+        object: HT_Object,
+        momentum: float = 0.5,
+        update_vectors: bool = True,
     ):
         Track.__init__(self, id)
-        self.objects = []
+        self.objects: list[HT_Object] = []
         self.v = None  # representative volume embedding vector(s)
         self.momentum = momentum
         self.update_vectors = update_vectors
@@ -104,15 +109,14 @@ class HT_Track(Track):
         self.objects.append(obj)
         self.add(obj)
 
+        if not self.update_vectors or obj.z is None:
+            return
+
         # Update volume embedding representation if available.
-        if self.update_vectors:
-            if obj.z is not None:
-                if self.v is None:
-                    self.v = obj.z.unsqueeze(0)
-                else:
-                    self.v = self.momentum * self.v + (
-                        1 - self.momentum
-                    ) * obj.z.unsqueeze(0)
+        if self.v is None:
+            self.v = obj.z.unsqueeze(0)
+        else:
+            self.v = self.momentum * self.v + (1 - self.momentum) * obj.z.unsqueeze(0)
 
         # self.objects[-1].to("cpu")
 
@@ -126,6 +130,42 @@ class HT_Track(Track):
 
     def __repr__(self):
         return str(self)
+
+
+class MatrixNormalizer:
+    def __init__(
+        self,
+        dist_norm_method: str = "standardize",
+    ):
+        """Set the distance normalization method for the combined cost matrix."""
+        assert dist_norm_method in (
+            "standardize",
+            "minmax",
+            "distribution",
+            "none",
+        ), f"Unknown dist_norm_method: {dist_norm_method}"
+
+        self.dist_norm_method = dist_norm_method
+
+    def __call__(self, cost_matrix: torch.Tensor, eps=1e-16) -> torch.Tensor:
+        if self.dist_norm_method == "standardize":
+            return (cost_matrix - torch.mean(cost_matrix)) / (
+                torch.std(cost_matrix) + eps
+            )
+        elif self.dist_norm_method == "minmax":
+            return (cost_matrix - torch.min(cost_matrix)) / (
+                torch.max(cost_matrix) - torch.min(cost_matrix) + eps
+            )
+        elif self.dist_norm_method == "distribution":
+            n_within = cost_matrix.shape[1]
+            cost_matrix_flat = cost_matrix.flatten()
+            cost_matrix_flat = cost_matrix_flat.sort()[0]
+            mean_within = torch.mean(cost_matrix_flat[:n_within])
+            mean_inter = torch.mean(cost_matrix_flat[n_within:])
+            # make mean_within = 0, mean_inter = 1
+            return (cost_matrix - mean_within) / (mean_inter - mean_within + eps)
+        else:
+            return cost_matrix
 
 
 class HungarianTracker:
@@ -146,7 +186,7 @@ class HungarianTracker:
         Path to a file containing the volume embedding feature vectors (.pt/.pth, .npy).
     file_object_ids : str or None
         Path to a file containing object IDs corresponding to the volume embedding vectors. (Optional)
-    device : str, optional
+    device : str | torch.device, optional
         Device to use for computations, e.g. 'cpu' or 'cuda'. Default is 'cpu'.
     scale : tuple of float, optional
         A 3-tuple (scale_z, scale_y, scale_x) to scale the (z, y, x) coordinates for geometric descriptors.
@@ -174,13 +214,14 @@ class HungarianTracker:
 
     def __init__(
         self,
-        file_objects: str,
-        file_z: str | None,
-        file_object_ids_z: str | None = None,
-        device="cpu",
+        file_objects: str | os.PathLike,
+        file_z: str | os.PathLike,
+        file_object_ids: str | os.PathLike | None = None,
+        device: str | torch.device = "cpu",
         scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
         momentum: float = 0.5,
         temperature: float = 0.05,
+        normalizer=MatrixNormalizer("standardize"),
         **kwargs,
     ):
         self.device = device
@@ -191,44 +232,23 @@ class HungarianTracker:
         self.objects, self.frame_index = self._parse_objects(
             file_objects,
             file_z,
-            file_object_ids_z,
+            file_object_ids,
             device,
             **kwargs,
         )
         self.tracks: list[HT_Track] = []
-        self.track_id_num = 0
         self.v = None
-        self.dist_norm_method = "standardize"
+        self._normalizer = normalizer
 
-    def set_dist_norm_method(self, dist_norm_method: str):
-        """Set the distance normalization method for the combined cost matrix."""
-        self.dist_norm_method = dist_norm_method
-
-    def _normalize_cost_matrix(self, cost_matrix: torch.Tensor) -> torch.Tensor:
-        if self.dist_norm_method == "standardize":
-            return (cost_matrix - torch.mean(cost_matrix)) / torch.std(cost_matrix)
-        elif self.dist_norm_method == "minmax":
-            return (cost_matrix - torch.min(cost_matrix)) / (
-                torch.max(cost_matrix) - torch.min(cost_matrix)
-            )
-        elif self.dist_norm_method == "distribution":
-            n_within = cost_matrix.shape[1]
-            cost_matrix_flat = cost_matrix.flatten()
-            cost_matrix_flat = cost_matrix_flat.sort()[0]
-            mean_within = torch.mean(cost_matrix_flat[:n_within])
-            mean_inter = torch.mean(cost_matrix_flat[n_within:])
-            # make mean_within = 0, mean_inter = 1
-            return (cost_matrix - mean_within) / (mean_inter - mean_within)
-        elif self.dist_norm_method == "none":
-            return cost_matrix
-        else:
-            raise ValueError(f"Unknown dist_norm_method: {self.dist_norm_method}")
+    @property
+    def track_id_num(self) -> int:
+        return len(self.tracks)
 
     def _parse_objects(
         self,
-        file_objects: str,
-        file_z: str | None,
-        file_object_ids_z: str | None,
+        file_objects: str | os.PathLike,
+        file_z: str | os.PathLike,
+        file_object_ids: str | os.PathLike | None,
         device,
         **kwargs,
     ) -> tuple[list[HT_Object], list[tuple[int, int]]]:
@@ -254,61 +274,64 @@ class HungarianTracker:
             },
         )
         df_objects.sort_values("t", inplace=True, ignore_index=True)
-        object_ids = df_objects["object_id"].values
-        logging.debug(f"Loaded {len(df_objects)} objects.")
+
+        logging.debug(f"Loaded {df_objects.index.size} objects.")
 
         # Load volume embeddings if used.
         logging.debug(f"Loading volume embeddings from {file_z}")
-        ext = os.path.splitext(file_z)[1]
-        if ext in [".pt", ".pth"]:
+
+        file_z = Path(file_z)
+        if file_z.suffix.endswith((".pt", ".pth")):
             Z = torch.load(file_z, map_location=device, weights_only=True)
-        elif ext in [".np", ".npy"]:
+        elif file_z.suffix.endswith((".np", ".npy")):
             arr = np.load(file_z)
             Z = torch.tensor(arr, dtype=torch.float32, device=device)
         else:
             raise ValueError(
                 "Unknown volume embedding file format. Supported: .pt/.pth, .npy"
             )
+
         logging.debug(f"Loaded {Z.shape[0]} volume embeddings.")
-        if Z.shape[0] != len(df_objects):
+        if Z.shape[0] != df_objects.index.size:
             raise ValueError(
                 "Number of volume embedding vectors does not match number of objects."
             )
 
-        if file_object_ids_z is not None:
+        if file_object_ids is None:
+            # Assuming the index is same as z_idx, if file_object_ids is not provided.
+            df_objects["z_idx"] = df_objects.index.to_series(name="z_idx")
+        else:
             logging.debug(
-                f"Loading object IDs for volume embeddings from {file_object_ids_z}"
+                f"Loading object IDs for volume embeddings from {file_object_ids}"
             )
+            assert Path(file_object_ids).name.endswith((".pth", ".pt"))
+
             pt_object_ids = torch.load(
-                file_object_ids_z, map_location="cpu", weights_only=True
+                file_object_ids, map_location="cpu", weights_only=True
             )
             # cast object IDs to string
             pt_object_ids = [str(obj_id) for obj_id in pt_object_ids]
             logging.debug(f"Loaded {len(pt_object_ids)} object IDs.")
             # map object id to index in Z
             map_obj_id_to_z_idx = {obj_id: i for i, obj_id in enumerate(pt_object_ids)}
-        else:
-            map_obj_id_to_z_idx = None
+            df_objects["z_idx"] = df_objects["object_id"].map(map_obj_id_to_z_idx)
 
         # Create HT_Object instances.
-        objects = []
-        for i, row in df_objects.iterrows():
-            obj_id = row["object_id"]
-            t = row["t"]
-            coords = (row["z"], row["y"], row["x"])  # (z, y, x)
-            z_idx = (
-                map_obj_id_to_z_idx[obj_id] if map_obj_id_to_z_idx is not None else i
+        # Ensure the column order, so that we can unpack tuple in order.
+        df_objects = df_objects[["object_id", "t", "x", "y", "z", "z_idx"]]
+        objects = [
+            HT_Object(object_id, t, (z, y, x), Z[z_idx])
+            for object_id, t, x, y, z, z_idx in df_objects.itertuples(
+                index=False,
+                name=None,
             )
-            z_vec = Z[z_idx]
-            obj = HT_Object(obj_id, t, coords, z_vec)
-            objects.append(obj)
+        ]
 
-        frame_index = []
-        for t_val in df_objects["t"].unique():
-            subset = df_objects[df_objects["t"] == t_val]
-            start_idx = subset.index[0]
-            end_idx = subset.index[-1] + 1
-            frame_index.append((start_idx, end_idx))
+        frame_index = (
+            df_objects.index.to_series().groupby(df_objects["t"]).agg(["first", "last"])
+        )
+        frame_index["last"] += 1
+        frame_index = list(frame_index.itertuples(index=False, name=None))
 
         return objects, frame_index
 
@@ -320,7 +343,6 @@ class HungarianTracker:
         arr_distance = arr_distance.sort()[0]
         arr_dist_within = arr_distance[:n_within]
         arr_dist_inter = arr_distance[n_within:]
-
         mean_within = torch.mean(arr_dist_within).item()
         mean_inter = torch.mean(arr_dist_inter).item()
 
@@ -328,122 +350,122 @@ class HungarianTracker:
 
         return max_distance
 
+    @torch.no_grad()
     def update_one_frame(
         self,
         new_objects: list[HT_Object],
+        weight_within: float,
+        max_gap_frames: int,
     ):
         """
         Update the tracker for one frame using the Hungarian algorithm.
         This method computes cost matrices from volume embeddings (using cosine similarity)
         """
         if len(self.tracks) == 0:
-            for new_object in new_objects:
-                self.tracks.append(
-                    HT_Track(str(self.track_id_num), new_object, momentum=self.momentum)
-                )
-                self.track_id_num += 1
-        else:
-            active_tracks = [
-                track
-                for track in self.tracks
-                if track.objects[-1].t >= new_objects[0].t - self.max_gap_frames - 1
+            self.tracks = [
+                HT_Track(str(i), obj, momentum=self.momentum)
+                for i, obj in enumerate(new_objects)
             ]
-            inactive_tracks = [
-                track
-                for track in self.tracks
-                if track.objects[-1].t < new_objects[0].t - self.max_gap_frames - 1
-            ]
+            return
 
-            cost_matrix = None
-            v_tracks = [track.v for track in active_tracks if track.v is not None]
-            if len(v_tracks) > 0:
-                v_tracks_cat = torch.cat(v_tracks).unsqueeze(
-                    1
-                )  # (len(v_tracks), 1, feat)
-                v_objects = torch.stack(
-                    [obj.z for obj in new_objects if obj.z is not None]
-                ).unsqueeze(0)
+        active_tracks = []
+        inactive_tracks = []
 
-                # calculate Cosine Similarity and eventual normalized similarity
-                pred_CS = (
-                    F.cosine_similarity(v_tracks_cat, v_objects, dim=2)
-                    / self.temperature
-                )
-                # apply row-wise softmax and column-wise softmax and average the two
-                pred_CS_sm_r = F.softmax(pred_CS, dim=0)
-                pred_CS_sm_c = F.softmax(pred_CS, dim=1)
-                pred_sim = (pred_CS_sm_r + pred_CS_sm_c) / 2
-
-                dist_matrix = -pred_sim
-                # dist_matrix = -1 * F.cosine_similarity(v_tracks_cat, v_objects, dim=2)
-                # normalize
-                cost_matrix = self._normalize_cost_matrix(dist_matrix)
+        for track in self.tracks:
+            if (
+                track.objects[-1].t + max_gap_frames + 1 >= new_objects[0].t
+                and track.v is not None
+            ):
+                active_tracks.append(track)
             else:
-                raise ValueError("No active tracks with volume embeddings found. ")
+                inactive_tracks.append(track)
 
-            max_distance = self.estimate_max_distance(
-                cost_matrix.flatten(),
-                len(active_tracks),
-                self.cutoff_weight_within,
+        if len(active_tracks) == 0:
+            raise ValueError("No active tracks with volume embeddings found. ")
+
+        v_tracks_cat = torch.stack([track.v for track in active_tracks]).to(
+            self.device
+        )  # (len(v_tracks), feat)
+        v_objects = torch.stack([obj.z for obj in new_objects if obj.z is not None]).to(
+            self.device
+        )  # (len(new_objects), feat)
+
+        # calculate Cosine Similarity and eventual normalized similarity
+        # (old_objs, 1, feat)
+        # (1, new_objs, feat)
+        pred_CS = (
+            F.cosine_similarity(
+                v_tracks_cat.unsqueeze(1),
+                v_objects.unsqueeze(0),
+                dim=2,
             )
-            cost_matrix_np = cost_matrix.cpu().numpy()
-            row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix_np)
+            / self.temperature
+        )
+        # apply row-wise softmax and column-wise softmax and average the two
+        pred_CS_sm_r = F.softmax(pred_CS, dim=0)
+        pred_CS_sm_c = F.softmax(pred_CS, dim=1)
+        pred_sim = (pred_CS_sm_r + pred_CS_sm_c) / 2
 
-            assigned_tracks = set()
-            assigned_objects = set()
+        dist_matrix = -pred_sim
+        # dist_matrix = -1 * F.cosine_similarity(v_tracks_cat, v_objects, dim=2)
+        # normalize
+        # (n_active, n_new_object)
+        cost_matrix = self._normalizer(dist_matrix)
 
-            for i, j in zip(row_ind, col_ind):
-                dist = cost_matrix_np[i, j]
-                if dist < max_distance:
-                    active_tracks[i].append(new_objects[j])
-                    assigned_tracks.add(i)
-                    assigned_objects.add(j)
+        max_distance = self.estimate_max_distance(
+            cost_matrix.flatten(),
+            len(active_tracks),
+            weight_within,
+        )
+        cost_matrix_np = cost_matrix.cpu().numpy()
+        # Hungarian/Kuhn-Munkres algorithm here. Actually, it used Jonker-Volgenant
+        row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix_np)
 
-            for j, obj in enumerate(new_objects):
-                if j not in assigned_objects:
-                    active_tracks.append(
-                        HT_Track(str(self.track_id_num), obj, momentum=self.momentum)
-                    )
-                    self.track_id_num += 1
+        assigned_tracks = set()
+        assigned_objects = set()
+        dismissed_objects = set(range(len(new_objects)))
+        for i, j in zip(row_ind, col_ind):
+            dist = cost_matrix_np[i, j]
+            if dist >= max_distance:
+                continue
+            active_tracks[i].append(new_objects[j])
+            assigned_tracks.add(i)
+            assigned_objects.add(j)
+            dismissed_objects.remove(j)
 
-            self.tracks = active_tracks + inactive_tracks
+        for j in sorted(dismissed_objects):
+            # we increment the id by count
+            track_id = str(len(inactive_tracks) + len(active_tracks) + 1)
+            active_tracks.append(
+                HT_Track(
+                    track_id,
+                    new_objects[j],
+                    momentum=self.momentum,
+                )
+            )
+        self.tracks = active_tracks + inactive_tracks
 
     def solve_dynamic_cutoff(
         self,
         cutoff_weight_within: float = 0.5,
         max_gap_frames: int = 1,
-    ):
+    ) -> list[HT_Track]:
         """
         Solve the entire tracking problem sequentially using dynamic cutoff estimation.
         This method dynamically updates max_distance for each frame based on the distances
         between objects in the current frame and the previous frame.
         """
-        self.cutoff_weight_within = cutoff_weight_within
-        self.max_gap_frames = max_gap_frames
-
         tik_all = datetime.datetime.now()
-        for t, (start, end) in enumerate(self.frame_index):
+        print(
+            f"Using weight_within: {cutoff_weight_within:.2f}, and max_gap_frames: {max_gap_frames:d} to solve the tracking"
+        )
+        for start, end in self.frame_index:
             new_objects = self.objects[start:end]
-            self.update_one_frame(new_objects)
+            self.update_one_frame(new_objects, cutoff_weight_within, max_gap_frames)
 
         tok_all = datetime.datetime.now()
         total_seconds = (tok_all - tik_all).total_seconds()
         print(
             f"Total tracking time: {total_seconds}s for {len(self.frame_index)} frames. ({total_seconds / len(self.frame_index):.4f}s per frame)."
         )
-
-    def save_tracks_napari(self, file_output_tracks):
-        """
-        Save the resulting tracks to a Napari-compatible track CSV file.
-        """
-        with open(file_output_tracks, "w") as f:
-            f.write("TrackID,ObjectID,t,z,y,x\n")
-            for track in self.tracks:
-                for obj in track.objects:
-                    f.write(
-                        f"{track.id},{obj.id},{obj.t},{obj.coord[0]},{obj.coord[1]},{obj.coord[2]}\n"
-                    )
-
-
-if __name__ == "__main__":
-    pass
+        return self.tracks

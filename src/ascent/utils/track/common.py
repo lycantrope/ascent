@@ -12,8 +12,8 @@ from scipy.spatial import distance
 
 
 class Spot:
-    def __init__(self, spot_id: str, t, coord: Sequence[float] = ()):
-        self.id: str = spot_id
+    def __init__(self, spot_id: str, t: int, coord: Sequence[float] = ()):
+        self.id = spot_id
         self.t = t
         self.coord = coord
         self.next: Spot | None = None
@@ -31,7 +31,7 @@ class Spot:
 
 # Head for iteration
 class TrackIterator:
-    def __init__(self, head: Spot):
+    def __init__(self, head: Spot | None):
         self.current = head
 
     def __iter__(self):
@@ -53,8 +53,6 @@ class Track:
         self.tail: Spot | None = None
 
     def __iter__(self) -> Iterator[Spot]:
-        if self.head is None:
-            return iter([])
         return TrackIterator(self.head)
 
     def add(self, spot: Spot):
@@ -91,19 +89,13 @@ class Track:
         return spot
 
     def t_set(self):
-        t_set = set()
-        for spot in self:
-            t_set.add(spot.t)
-        return t_set
+        return set((spot.t for spot in self))
 
     def __repr__(self):
         return f"Track({self.id})"
 
     def __len__(self):
-        count = 0
-        for _ in self:
-            count += 1
-        return count
+        return sum((1 for _ in self))
 
 
 def track_to_dict(tracks: dict[str, Track]) -> dict[int, dict[str, str]]:

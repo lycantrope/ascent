@@ -25,6 +25,7 @@ from torch.utils.data import DataLoader
 from ascent.datasets.tracking_dataset import ObjectEmbeddingDataset3D
 from ascent.models.netr import NETr
 from ascent.utils.common import load_config, to_device
+from ascent.utils.track.io import save_tracks_napari
 from ascent.utils.track.tracker import HungarianTracker
 
 # -----------------------------------------------------------------------------
@@ -180,21 +181,22 @@ def main() -> None:
     # ---------------- Tracking ----------------
     tracker = HungarianTracker(
         file_objects=cfg["dataset_file_coord"],
-        file_z=out_dir / f"{cfg['runtime_output_prefix']}_pred_z.pt",
-        file_object_ids_z=out_dir
-        / f"{cfg['runtime_output_prefix']}_pred_object_ids.pt",
+        file_z=(out_dir / f"{cfg['runtime_output_prefix']}_pred_z.pt"),
+        file_object_ids=(
+            out_dir / f"{cfg['runtime_output_prefix']}_pred_object_ids.pt"
+        ),
         device=device,
         momentum=cfg["tracking_momentum"],
         temperature=cfg["tracking_temperature"],
     )
     logging.info("Tracker initialized")
-    tracker.solve_dynamic_cutoff(
+    tracks = tracker.solve_dynamic_cutoff(
         cutoff_weight_within=cfg["tracking_w_within"],
         max_gap_frames=cfg["tracking_max_gap_frames"],
     )
     logging.info("Tracking completed")
     track_csv = out_dir / f"{cfg['runtime_output_prefix']}_tracks.csv"
-    tracker.save_tracks_napari(track_csv)
+    save_tracks_napari(track_csv, tracks)
     logging.info("Tracking saved to %s", track_csv)
     logging.info("ASCENT tracking finished")
 

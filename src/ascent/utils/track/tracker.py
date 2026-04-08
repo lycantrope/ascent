@@ -335,18 +335,20 @@ class HungarianTracker:
 
         return objects, frame_index
 
-    def estimate_max_distance(self, arr_distance, n_within, weight_within=0.5):
+    def estimate_max_distance(self, arr_distance: torch.Tensor, weight_within=0.5):
         """
         Estimate the max_distance threshold by splitting distances into within-track and inter-track subsets.
-        (Unchanged from your original code.)
         """
-        arr_distance = arr_distance.sort()[0]
-        arr_dist_within = arr_distance[:n_within]
-        arr_dist_inter = arr_distance[n_within:]
-        mean_within = torch.mean(arr_dist_within).item()
-        mean_inter = torch.mean(arr_dist_inter).item()
 
-        max_distance = weight_within * mean_within + (1 - weight_within) * mean_inter
+        # Best fit from active_track to new_objects
+        arr_dist_within, _ = torch.min(arr_distance, dim=1)
+        mean_within = torch.mean(arr_dist_within)
+        mean_inter = (arr_distance.sum() - arr_dist_within.sum()) / (
+            arr_distance.numel() - arr_dist_within.numel()
+        )
+        max_distance = (
+            weight_within * mean_within.item() + (1 - weight_within) * mean_inter.item()
+        )
 
         return max_distance
 
@@ -413,8 +415,7 @@ class HungarianTracker:
         cost_matrix = self._normalizer(dist_matrix)
 
         max_distance = self.estimate_max_distance(
-            cost_matrix.flatten(),
-            len(active_tracks),
+            cost_matrix,
             weight_within,
         )
         cost_matrix_np = cost_matrix.cpu().numpy()

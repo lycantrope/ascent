@@ -33,14 +33,16 @@ class HT_Object(Spot):
         Move the object's feature vectors to the specified device.
     """
 
+    __slots__ = ("z",)
+
     def __init__(
         self,
-        id: str,
+        spot_id: str,
         t: int,
         coord: tuple[float, float, float],
         z: torch.Tensor,
     ):
-        Spot.__init__(self, id, t, coord)
+        super().__init__(spot_id, t, coord)
         self.z = z  # volume embedding
 
     def to(self, device):
@@ -91,12 +93,12 @@ class HT_Track(Track):
 
     def __init__(
         self,
-        id: str,
+        track_id: str,
         object: HT_Object,
         momentum: float = 0.5,
         update_vectors: bool = True,
     ):
-        Track.__init__(self, id)
+        super().__init__(track_id)
         self.objects: list[HT_Object] = []
         self.v = None  # representative volume embedding vector(s)
         self.momentum = momentum

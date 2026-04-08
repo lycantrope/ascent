@@ -12,6 +12,8 @@ from scipy.spatial import distance
 
 
 class Spot:
+    __slots__ = ("id", "t", "coord", "next", "prev")
+
     def __init__(self, spot_id: str, t: int, coord: Sequence[float] = ()):
         self.id = spot_id
         self.t = t

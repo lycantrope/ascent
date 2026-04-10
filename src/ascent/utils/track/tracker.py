@@ -421,7 +421,7 @@ class HungarianTracker:
             weight_within,
         )
         cost_matrix_np = cost_matrix.cpu().numpy()
-        print(cost_matrix_np.shape)
+
         # Hungarian/Kuhn-Munkres algorithm here. Actually, it used Jonker-Volgenant
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix_np)
 

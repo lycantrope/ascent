@@ -390,10 +390,8 @@ class HungarianTracker:
         v_tracks_cat = torch.stack([track.v for track in active_tracks]).to(
             self.device
         )  # (len(v_tracks), feat)
-        v_objects = (
-            torch.stack([obj.z for obj in new_objects if obj.z is not None])
-            .unsqueeze(0)
-            .to(self.device)
+        v_objects = torch.stack([obj.z for obj in new_objects if obj.z is not None]).to(
+            self.device
         )  # (len(new_objects), feat)
 
         # calculate Cosine Similarity and eventual normalized similarity
@@ -423,6 +421,7 @@ class HungarianTracker:
             weight_within,
         )
         cost_matrix_np = cost_matrix.cpu().numpy()
+        print(cost_matrix_np.shape)
         # Hungarian/Kuhn-Munkres algorithm here. Actually, it used Jonker-Volgenant
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix_np)
 

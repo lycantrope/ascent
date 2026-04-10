@@ -34,4 +34,10 @@ def main() -> int:
         sys.argv = ["ascent-train"] + rest
         train_main()
 
+    elif ns.cmd == "track":
+        from ascent.tools.run_track import main as run_track_main
+
+        sys.argv = ["ascent-track"] + rest
+        run_track_main()
+
     return 0

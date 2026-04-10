@@ -387,7 +387,7 @@ class HungarianTracker:
         if len(active_tracks) == 0:
             raise ValueError("No active tracks with volume embeddings found. ")
 
-        v_tracks_cat = torch.stack([track.v for track in active_tracks]).to(
+        v_tracks_cat = torch.concatenate([track.v for track in active_tracks]).to(
             self.device
         )  # (len(v_tracks), feat)
         v_objects = torch.stack([obj.z for obj in new_objects if obj.z is not None]).to(

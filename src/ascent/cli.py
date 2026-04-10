@@ -17,6 +17,7 @@ def main() -> int:
 
     sub.add_parser("run", help="Feature extraction + tracking")
     sub.add_parser("train", help="Train a model")
+    sub.add_parser("track", help="Tracking only")
 
     # Parse only the subcommand; leave all other flags as 'unknown'
     ns, rest = parser.parse_known_args()

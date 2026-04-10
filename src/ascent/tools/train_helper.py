@@ -278,14 +278,13 @@ def get_last_saved_model_path_epoch_time(cfg):
 
     re_model_save_path = re.compile(r"(.*)_epoch_(\d+)_time_(\d+).pth")
     saved_models = glob.glob(model_save_path.replace(".pth", "_epoch_*_time_*.pth"))
-    saved_models = [m for m in saved_models if re_model_save_path.match(m)]
+    saved_models = [(str(p), re_model_save_path.match(p)) for p in saved_models]
+    saved_models = [(p, m) for (p, m) in saved_models if m is not None]
     if len(saved_models) > 0:
-        saved_models.sort(
-            key=lambda x: int(re_model_save_path.match(x).group(2)), reverse=True
-        )
-        match = re_model_save_path.match(saved_models[0])
+        # Retrieve latest epoch and model
+        latest_model_path, match = max(saved_models, key=lambda x: int(x[1].group(2)))
         epoch, savetime = int(match.group(2)), int(match.group(3))
-        return saved_models[0], epoch, savetime
+        return latest_model_path, epoch, savetime
     else:
         return None, None, None
 

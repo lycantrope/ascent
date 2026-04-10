@@ -390,8 +390,10 @@ class HungarianTracker:
         v_tracks_cat = torch.stack([track.v for track in active_tracks]).to(
             self.device
         )  # (len(v_tracks), feat)
-        v_objects = torch.stack([obj.z for obj in new_objects if obj.z is not None]).to(
-            self.device
+        v_objects = (
+            torch.stack([obj.z for obj in new_objects if obj.z is not None])
+            .unsqueeze(0)
+            .to(self.device)
         )  # (len(new_objects), feat)
 
         # calculate Cosine Similarity and eventual normalized similarity

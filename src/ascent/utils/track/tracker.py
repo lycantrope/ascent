@@ -439,7 +439,7 @@ class HungarianTracker:
 
         for j in sorted(dismissed_objects):
             # we increment the id by count
-            track_id = str(len(inactive_tracks) + len(active_tracks) + 1)
+            track_id = str(len(inactive_tracks) + len(active_tracks))
             active_tracks.append(
                 HT_Track(
                     track_id,

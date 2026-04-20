@@ -25,7 +25,7 @@ def main() -> int:
         "--disable-ddp",
         action="store_true",
         default=False,
-        help="Disable multiple GPUs.",
+        help="Disable multiple GPUs",
     )
 
     base = sub.add_parser("run", help="Feature extraction + tracking")

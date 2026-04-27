@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import defaultdict
 from pathlib import Path
 from typing import Sequence
 
 import h5py
 import numpy as np
+import pandas as pd
 import torch
 import zarr
 import zarr.storage
@@ -289,30 +289,34 @@ class ObjectEmbeddingDataset3D(Dataset):
 
     def load_objects(self, coord_file, frame_sample_method, frame_sample_size):
         # Assuming coordinates are stored in a CSV format: object_id, frame_index, z_coord, x_coord, y_coord
-        self.objects_by_frame = defaultdict(list)
-        frame_set = set()
+        self.objects_by_frame = {}
         self.max_objects = 0
-        with open(coord_file, "r") as file:
-            file.readline()  # Skip header
-            for line in file:
-                if line == "":
-                    continue
-                tokens = line.strip().split(",")
-                object_id, frame, z, y, x = tokens[:5]
+        obj_df = pd.read_csv(coord_file)
 
-                try:
-                    frame = int(frame)
-                except ValueError:
-                    frame = int(float(frame))
-                object_id = int(object_id)
-                z, y, x = float(z), float(y), float(x)
-                assert frame <= self.max_frame, f"Frame index {frame} out of bounds"
-                self.objects_by_frame[frame].append((object_id, frame, z, y, x))
-                n_obj = len(self.objects_by_frame[frame])
-                self.max_objects = max(n_obj, self.max_objects)
-                frame_set.add(frame)
+        assert {"object_id", "t", "z", "y", "x"}.issubset(
+            obj_df.columns
+        ), f"Columns must include [object_id, t, z, y, x] {obj_df.columns}"
 
-        self.frame_list = sorted(frame_set)
+        obj_df = obj_df.sort_values(["t", "object_id"], ignore_index=True)
+
+        obj_df["t"] = obj_df["t"].astype("i8")
+        obj_df[["x", "y", "z"]] = obj_df[["x", "y", "z"]].astype("f8")
+
+        frame = obj_df["t"].to_numpy()
+        idx_out_of_bounds = frame[frame > self.max_frame]
+
+        assert (
+            len(idx_out_of_bounds) == 0
+        ), f"Frame index {idx_out_of_bounds} out of bounds"
+
+        def to_list(df: pd.DataFrame):
+            return list(df.itertuples(index=False, name=None))
+
+        objects_by_frame = obj_df.groupby("t")[["object_id", "t", "z", "y", "x"]].apply(
+            to_list
+        )
+
+        self.frame_list = sorted(objects_by_frame.index)
 
         # sample frames
         if frame_sample_method not in (None, "regular", "first"):
@@ -338,12 +342,11 @@ class ObjectEmbeddingDataset3D(Dataset):
         elif frame_sample_method == "first":
             self.frame_list = self.frame_list[:frame_sample_size]
 
+        objects_by_frame = objects_by_frame[self.frame_list]
+        self.max_objects = int(objects_by_frame.agg(len).max())
         self.objects_by_frame = {
-            frame: self.objects_by_frame[frame] for frame in self.frame_list
+            frame: objects_by_frame[frame] for frame in self.frame_list
         }
-        self.max_objects = max(
-            [len(self.objects_by_frame[frame]) for frame in self.frame_list]
-        )
         logging.info(f"Sampled frames: {self.frame_list}")
 
     def get_image_at(self, t: int) -> torch.Tensor:

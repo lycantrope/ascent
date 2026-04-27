@@ -293,13 +293,22 @@ class ObjectEmbeddingDataset3D(Dataset):
         self.max_objects = 0
         obj_df = pd.read_csv(coord_file)
 
+        if "object_id" not in obj_df.columns:
+            # Try to rename the ObjectID into object_id
+            obj_df.rename(
+                columns={"ObjectID": "object_id"},
+                inplace=True,
+                errors="ignore",
+            )
+
         assert {"object_id", "t", "z", "y", "x"}.issubset(
             obj_df.columns
-        ), f"Columns must include [object_id, t, z, y, x] {obj_df.columns}"
+        ), f"Columns must include [object_id, t, z, y, x] or [ObjectID, t, z, y, x] {obj_df.columns}"
 
         obj_df = obj_df.sort_values(["t", "object_id"], ignore_index=True)
 
         obj_df["t"] = obj_df["t"].astype("i8")
+        obj_df["object_id"] = obj_df["object_id"].astype("i8")
         obj_df[["x", "y", "z"]] = obj_df[["x", "y", "z"]].astype("f8")
 
         frame = obj_df["t"].to_numpy()
